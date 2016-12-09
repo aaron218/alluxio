@@ -25,6 +25,7 @@ import javax.annotation.concurrent.ThreadSafe;
 @ThreadSafe
 public enum ExceptionMessage {
   // general
+  INVALID_PREFIX("Parent path {0} is not a prefix of child {1}"),
   NOT_SUPPORTED("This method is not supported"),
   PATH_DOES_NOT_EXIST("Path {0} does not exist"),
   PATH_MUST_BE_FILE("Path {0} must be a file"),
@@ -32,8 +33,6 @@ public enum ExceptionMessage {
   PATH_INVALID("Path {0} is invalid"),
 
   // general block
-  BLOCK_NOT_LOCALLY_AVAILABLE("blockId {0,number,#} is not available on local machine"),
-  BLOCK_UNAVAILABLE("blockId {0,number,#} is not available in Alluxio"),
   CANNOT_REQUEST_SPACE("Not enough space left on worker {0} to store blockId {1,number,#}."),
   NO_LOCAL_WORKER("Local address {0} requested but there is no local worker"),
   NO_WORKER_AVAILABLE_ON_ADDRESS("No Alluxio worker available for address {0}"),
@@ -112,6 +111,7 @@ public enum ExceptionMessage {
   FILE_ALREADY_EXISTS("{0} already exists"),
   FILE_CREATE_IS_DIRECTORY("{0} already exists. Directories cannot be overwritten with create"),
   HDFS_FILE_NOT_FOUND("File {0} with URI {1} is not found"),
+  PARENT_CREATION_FAILED("Unable to create parent directories for path {0}"),
 
   // file system master
   INODE_DOES_NOT_EXIST("inodeId {0,number,#} does not exist"),

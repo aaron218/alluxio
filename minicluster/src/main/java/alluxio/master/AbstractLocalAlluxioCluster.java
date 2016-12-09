@@ -122,7 +122,7 @@ public abstract class AbstractLocalAlluxioCluster {
     String underfsAddress = Configuration.get(PropertyKey.UNDERFS_ADDRESS);
 
     // Deletes the ufs dir for this test from to avoid permission problems
-    UnderFileSystemUtils.deleteDir(underfsAddress);
+    UnderFileSystemUtils.deleteDirIfExists(underfsAddress);
 
     // Creates ufs dir. This must be called before starting UFS with UnderFileSystemCluster.get().
     UnderFileSystemUtils.mkdirIfNotExists(underfsAddress);
@@ -161,6 +161,7 @@ public abstract class AbstractLocalAlluxioCluster {
     // This must happen after UFS is started with UnderFileSystemCluster.get().
     if (!mUfsCluster.getClass().getName().equals(LocalFileSystemCluster.class.getName())) {
       String ufsAddress = mUfsCluster.getUnderFilesystemAddress() + mWorkDirectory;
+      UnderFileSystemUtils.mkdirIfNotExists(ufsAddress);
       Configuration.set(PropertyKey.UNDERFS_ADDRESS, ufsAddress);
     }
   }
