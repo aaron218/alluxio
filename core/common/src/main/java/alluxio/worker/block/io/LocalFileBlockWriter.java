@@ -15,13 +15,14 @@ import alluxio.util.io.BufferUtils;
 
 import com.google.common.base.Preconditions;
 import com.google.common.io.Closer;
+import io.netty.buffer.ByteBuf;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.channels.WritableByteChannel;
+import java.nio.channels.GatheringByteChannel;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -34,6 +35,8 @@ public final class LocalFileBlockWriter implements BlockWriter {
   private final RandomAccessFile mLocalFile;
   private final FileChannel mLocalFileChannel;
   private final Closer mCloser = Closer.create();
+  private long mPosition;
+  private boolean mClosed;
 
   /**
    * Constructs a Block writer given the file path of the block.
@@ -48,18 +51,36 @@ public final class LocalFileBlockWriter implements BlockWriter {
   }
 
   @Override
-  public WritableByteChannel getChannel() {
+  public GatheringByteChannel getChannel() {
     return mLocalFileChannel;
   }
 
   @Override
   public long append(ByteBuffer inputBuf) throws IOException {
-    return write(mLocalFileChannel.size(), inputBuf.duplicate());
+    long bytesWritten = write(mLocalFileChannel.size(), inputBuf.duplicate());
+    mPosition += bytesWritten;
+    return bytesWritten;
+  }
+
+  @Override
+  public void transferFrom(ByteBuf buf) throws IOException {
+    mPosition += buf.readBytes(mLocalFileChannel, buf.readableBytes());
+  }
+
+  @Override
+  public long getPosition() {
+    return mPosition;
   }
 
   @Override
   public void close() throws IOException {
+    if (mClosed) {
+      return;
+    }
+    mClosed = true;
+
     mCloser.close();
+    mPosition = -1;
   }
 
   /**

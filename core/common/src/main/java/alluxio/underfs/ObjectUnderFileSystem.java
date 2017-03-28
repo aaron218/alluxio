@@ -13,7 +13,6 @@ package alluxio.underfs;
 
 import alluxio.AlluxioURI;
 import alluxio.Configuration;
-import alluxio.Constants;
 import alluxio.PropertyKey;
 import alluxio.exception.ExceptionMessage;
 import alluxio.underfs.options.CreateOptions;
@@ -40,11 +39,12 @@ import java.util.Map;
 import javax.annotation.concurrent.ThreadSafe;
 
 /**
- * A object based abstract {@link UnderFileSystem}.
+ * An object based abstract {@link UnderFileSystem}. Object Stores implementing the
+ * {@link UnderFileSystem} interface should derive from this class.
  */
 @ThreadSafe
 public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
-  private static final Logger LOG = LoggerFactory.getLogger(Constants.LOGGER_TYPE);
+  private static final Logger LOG = LoggerFactory.getLogger(ObjectUnderFileSystem.class);
 
   /** Default maximum length for a single listing query. */
   private static final int DEFAULT_MAX_LISTING_CHUNK_LENGTH = 1000;
@@ -140,10 +140,10 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
 
   @Override
   public OutputStream create(String path, CreateOptions options) throws IOException {
-    if (mkdirs(getParentPath(path))) {
-      return createObject(stripPrefixIfPresent(path));
+    if (options.getCreateParent() && !mkdirs(getParentPath(path))) {
+      throw new IOException(ExceptionMessage.PARENT_CREATION_FAILED.getMessage(path));
     }
-    throw new IOException(ExceptionMessage.PARENT_CREATION_FAILED.getMessage(path));
+    return createObject(stripPrefixIfPresent(path));
   }
 
   @Override
@@ -477,13 +477,13 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
   }
 
   /**
-   * Checks if the key is the root.
+   * Checks if the path is the root.
    *
-   * @param key ufs path including scheme and bucket
-   * @return true if the key is the root, false otherwise
+   * @param path ufs path including scheme and bucket
+   * @return true if the path is the root, false otherwise
    */
-  protected boolean isRoot(String key) {
-    return PathUtils.normalizePath(key, PATH_SEPARATOR).equals(
+  protected boolean isRoot(String path) {
+    return PathUtils.normalizePath(path, PATH_SEPARATOR).equals(
         PathUtils.normalizePath(getRootKey(), PATH_SEPARATOR));
   }
 
@@ -534,7 +534,8 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
     String dir = stripPrefixIfPresent(path);
     ObjectListingChunk objs = getObjectListingChunk(dir, recursive);
     // If there are, this is a folder and we can create the necessary metadata
-    if (objs != null && objs.getObjectNames() != null && objs.getObjectNames().length > 0) {
+    if (objs != null && ((objs.getObjectNames() != null && objs.getObjectNames().length > 0)
+        || (objs.getCommonPrefixes() != null && objs.getCommonPrefixes().length > 0))) {
       // If the breadcrumb exists, this is a no-op
       mkdirsInternal(dir);
       return objs;
@@ -657,7 +658,8 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
    * Internal function to open an input stream to an object.
    *
    * @param key the key to open
-   * @return true if successful, false if an exception is thrown
+   * @return an {@link InputStream} to read from key
+   * @throws IOException if a non-Alluxio error occurs
    */
   protected abstract InputStream openObject(String key, OpenOptions options) throws IOException;
 

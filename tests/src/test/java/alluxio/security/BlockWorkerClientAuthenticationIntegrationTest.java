@@ -14,7 +14,7 @@ package alluxio.security;
 import alluxio.LocalAlluxioClusterResource;
 import alluxio.PropertyKey;
 import alluxio.client.block.BlockWorkerClient;
-import alluxio.client.block.RetryHandlingBlockWorkerClient;
+import alluxio.client.file.FileSystemContext;
 import alluxio.client.util.ClientTestUtils;
 import alluxio.security.MasterClientAuthenticationIntegrationTest.NameMatchAuthenticationProvider;
 
@@ -81,14 +81,16 @@ public final class BlockWorkerClientAuthenticationIntegrationTest {
       confParams = {PropertyKey.Name.SECURITY_AUTHENTICATION_TYPE,
           "CUSTOM", PropertyKey.Name.SECURITY_AUTHENTICATION_CUSTOM_PROVIDER_CLASS,
           NameMatchAuthenticationProvider.FULL_CLASS_NAME,
-          PropertyKey.Name.SECURITY_LOGIN_USERNAME, "alluxio"})
+          PropertyKey.Name.SECURITY_LOGIN_USERNAME, "alluxio",
+          PropertyKey.Name.USER_RPC_RETRY_MAX_NUM_RETRY, "1"
+      })
   public void customAuthenticationDenyConnect() throws Exception {
     boolean failedToConnect = false;
 
     // Using no-alluxio as loginUser to connect to Worker, the IOException will be thrown
     LoginUserTestUtils.resetLoginUser("no-alluxio");
 
-    try (BlockWorkerClient blockWorkerClient = new RetryHandlingBlockWorkerClient(
+    try (BlockWorkerClient blockWorkerClient = FileSystemContext.INSTANCE.createBlockWorkerClient(
         mLocalAlluxioClusterResource.get().getWorkerAddress(), (long) 1 /* fake
         session id */)) {
       // Just to supress the "Empty try block" warning in CheckStyle.
@@ -107,8 +109,9 @@ public final class BlockWorkerClientAuthenticationIntegrationTest {
    * Tests Alluxio Worker client connects or disconnects to the Worker.
    */
   private void authenticationOperationTest() throws Exception {
-    RetryHandlingBlockWorkerClient blockWorkerClient = new RetryHandlingBlockWorkerClient(
-        mLocalAlluxioClusterResource.get().getWorkerAddress(), (long) 1 /* fake session id */);
+    BlockWorkerClient blockWorkerClient = FileSystemContext.INSTANCE
+        .createBlockWorkerClient(mLocalAlluxioClusterResource.get().getWorkerAddress(), (long) 1
+                /* fake session id */);
 
     blockWorkerClient.close();
   }

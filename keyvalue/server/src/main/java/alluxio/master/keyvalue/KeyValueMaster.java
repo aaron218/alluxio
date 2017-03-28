@@ -21,11 +21,13 @@ import alluxio.exception.FileAlreadyExistsException;
 import alluxio.exception.FileDoesNotExistException;
 import alluxio.exception.InvalidPathException;
 import alluxio.master.AbstractMaster;
+import alluxio.master.MasterRegistry;
 import alluxio.master.file.FileSystemMaster;
 import alluxio.master.file.options.CreateDirectoryOptions;
+import alluxio.master.file.options.DeleteOptions;
+import alluxio.master.file.options.RenameOptions;
 import alluxio.master.journal.Journal;
 import alluxio.master.journal.JournalOutputStream;
-import alluxio.master.journal.JournalProtoUtils;
 import alluxio.proto.journal.Journal.JournalEntry;
 import alluxio.proto.journal.KeyValue.CompletePartitionEntry;
 import alluxio.proto.journal.KeyValue.CompleteStoreEntry;
@@ -41,17 +43,15 @@ import alluxio.util.io.PathUtils;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Message;
+import com.google.common.collect.ImmutableSet;
 import org.apache.thrift.TProcessor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import javax.annotation.concurrent.ThreadSafe;
@@ -62,7 +62,8 @@ import javax.annotation.concurrent.ThreadSafe;
  */
 @ThreadSafe
 public final class KeyValueMaster extends AbstractMaster {
-  private static final Logger LOG = LoggerFactory.getLogger(Constants.LOGGER_TYPE);
+  private static final Set<Class<?>> DEPS = ImmutableSet.<Class<?>>of(FileSystemMaster.class);
+
   private final FileSystemMaster mFileSystemMaster;
 
   /** Map from file id of a complete store to the list of partitions in this store. */
@@ -74,24 +75,16 @@ public final class KeyValueMaster extends AbstractMaster {
   private final Map<Long, List<PartitionInfo>> mIncompleteStoreToPartitions;
 
   /**
-   * @param baseDirectory the base journal directory
-   * @return the journal directory for this master
-   */
-  public static String getJournalDirectory(String baseDirectory) {
-    return PathUtils.concatPath(baseDirectory, Constants.KEY_VALUE_MASTER_NAME);
-  }
-
-  /**
-   * @param fileSystemMaster handler to a {@link FileSystemMaster} to use for filesystem operations
+   * @param registry the master registry
    * @param journal a {@link Journal} to write journal entries to
    */
-  public KeyValueMaster(FileSystemMaster fileSystemMaster,
-      Journal journal) {
+  public KeyValueMaster(MasterRegistry registry, Journal journal) {
     super(journal, new SystemClock(), ExecutorServiceFactories
         .fixedThreadPoolExecutorServiceFactory(Constants.KEY_VALUE_MASTER_NAME, 2));
-    mFileSystemMaster = fileSystemMaster;
+    mFileSystemMaster = registry.get(FileSystemMaster.class);
     mCompleteStoreToPartitions = new HashMap<>();
     mIncompleteStoreToPartitions = new HashMap<>();
+    registry.add(KeyValueMaster.class, this);
   }
 
   @Override
@@ -108,23 +101,27 @@ public final class KeyValueMaster extends AbstractMaster {
   }
 
   @Override
+  public Set<Class<?>> getDependencies() {
+    return DEPS;
+  }
+
+  @Override
   public synchronized void processJournalEntry(JournalEntry entry) throws IOException {
-    Message innerEntry = JournalProtoUtils.unwrap(entry);
     try {
-      if (innerEntry instanceof CreateStoreEntry) {
-        createStoreFromEntry((CreateStoreEntry) innerEntry);
-      } else if (innerEntry instanceof CompletePartitionEntry) {
-        completePartitionFromEntry((CompletePartitionEntry) innerEntry);
-      } else if (innerEntry instanceof CompleteStoreEntry) {
-        completeStoreFromEntry((CompleteStoreEntry) innerEntry);
-      } else if (innerEntry instanceof DeleteStoreEntry) {
-        deleteStoreFromEntry((DeleteStoreEntry) innerEntry);
-      } else if (innerEntry instanceof RenameStoreEntry) {
-        renameStoreFromEntry((RenameStoreEntry) innerEntry);
-      } else if (innerEntry instanceof MergeStoreEntry) {
-        mergeStoreFromEntry((MergeStoreEntry) innerEntry);
+      if (entry.hasCreateStore()) {
+        createStoreFromEntry(entry.getCreateStore());
+      } else if (entry.hasCompletePartition()) {
+        completePartitionFromEntry(entry.getCompletePartition());
+      } else if (entry.hasCompleteStore()) {
+        completeStoreFromEntry(entry.getCompleteStore());
+      } else if (entry.hasDeleteStore()) {
+        deleteStoreFromEntry(entry.getDeleteStore());
+      } else if (entry.hasRenameStore()) {
+        renameStoreFromEntry(entry.getRenameStore());
+      } else if (entry.hasMergeStore()) {
+        mergeStoreFromEntry(entry.getMergeStore());
       } else {
-        throw new IOException(ExceptionMessage.UNEXPECTED_JOURNAL_ENTRY.getMessage(innerEntry));
+        throw new IOException(ExceptionMessage.UNEXPECTED_JOURNAL_ENTRY.getMessage(entry));
       }
     } catch (AlluxioException e) {
       throw new RuntimeException(e);
@@ -137,18 +134,18 @@ public final class KeyValueMaster extends AbstractMaster {
     for (Map.Entry<Long, List<PartitionInfo>> entry : mCompleteStoreToPartitions.entrySet()) {
       long fileId = entry.getKey();
       List<PartitionInfo> partitions = entry.getValue();
-      outputStream.writeEntry(newCreateStoreEntry(fileId));
+      outputStream.write(newCreateStoreEntry(fileId));
       for (PartitionInfo info : partitions) {
-        outputStream.writeEntry(newCompletePartitionEntry(fileId, info));
+        outputStream.write(newCompletePartitionEntry(fileId, info));
       }
-      outputStream.writeEntry(newCompleteStoreEntry(fileId));
+      outputStream.write(newCompleteStoreEntry(fileId));
     }
     for (Map.Entry<Long, List<PartitionInfo>> entry : mIncompleteStoreToPartitions.entrySet()) {
       long fileId = entry.getKey();
       List<PartitionInfo> partitions = entry.getValue();
-      outputStream.writeEntry(newCreateStoreEntry(fileId));
+      outputStream.write(newCreateStoreEntry(fileId));
       for (PartitionInfo info : partitions) {
-        outputStream.writeEntry(newCompletePartitionEntry(fileId, info));
+        outputStream.write(newCompletePartitionEntry(fileId, info));
       }
     }
   }
@@ -162,7 +159,7 @@ public final class KeyValueMaster extends AbstractMaster {
    * Marks a partition complete and adds it to an incomplete key-value store.
    *
    * @param path URI of the key-value store
-   * @param info information of this completed parition
+   * @param info information of this completed partition
    * @throws AccessControlException if permission checking fails
    * @throws FileDoesNotExistException if the key-value store URI does not exists
    * @throws InvalidPathException if the path is invalid
@@ -249,9 +246,10 @@ public final class KeyValueMaster extends AbstractMaster {
       throws FileAlreadyExistsException, InvalidPathException, AccessControlException {
     try {
       // Create this dir
-      mFileSystemMaster.createDirectory(path, CreateDirectoryOptions.defaults().setRecursive(true));
+      mFileSystemMaster
+          .createDirectory(path, CreateDirectoryOptions.defaults().setRecursive(true));
     } catch (IOException e) {
-      // TODO(binfan): Investigate why {@link mFileSystemMaster.createDirectory} throws IOException
+      // TODO(binfan): Investigate why {@link FileSystemMaster#createDirectory} throws IOException
       throw new InvalidPathException(
           String.format("Failed to createStore: can not create path %s", path), e);
     } catch (FileDoesNotExistException e) {
@@ -294,7 +292,7 @@ public final class KeyValueMaster extends AbstractMaster {
       throws IOException, InvalidPathException, FileDoesNotExistException, AlluxioException {
     long fileId = getFileId(uri);
     checkIsCompletePartition(fileId, uri);
-    mFileSystemMaster.delete(uri, true);
+    mFileSystemMaster.delete(uri, DeleteOptions.defaults().setRecursive(true));
     deleteStoreInternal(fileId);
     writeJournalEntry(newDeleteStoreEntry(fileId));
     flushJournal();
@@ -338,7 +336,7 @@ public final class KeyValueMaster extends AbstractMaster {
     long oldFileId = getFileId(oldUri);
     checkIsCompletePartition(oldFileId, oldUri);
     try {
-      mFileSystemMaster.rename(oldUri, newUri);
+      mFileSystemMaster.rename(oldUri, newUri, RenameOptions.defaults());
     } catch (FileAlreadyExistsException e) {
       throw new FileAlreadyExistsException(
           String.format("failed to rename store:the path %s has been used", newUri), e);
@@ -382,7 +380,8 @@ public final class KeyValueMaster extends AbstractMaster {
     // Rename fromUri to "toUri/%s-%s" % (last component of fromUri, UUID).
     // NOTE: rename does not change the existing block IDs.
     mFileSystemMaster.rename(fromUri, new AlluxioURI(PathUtils.concatPath(toUri.toString(),
-        String.format("%s-%s", fromUri.getName(), UUID.randomUUID().toString()))));
+        String.format("%s-%s", fromUri.getName(), UUID.randomUUID().toString()))),
+        RenameOptions.defaults());
     mergeStoreInternal(fromFileId, toFileId);
 
     writeJournalEntry(newMergeStoreEntry(fromFileId, toFileId));
@@ -428,8 +427,8 @@ public final class KeyValueMaster extends AbstractMaster {
   private JournalEntry newCompletePartitionEntry(long fileId, PartitionInfo info) {
     CompletePartitionEntry completePartition =
         CompletePartitionEntry.newBuilder().setStoreId(fileId).setBlockId(info.getBlockId())
-            .setKeyStartBytes(ByteString.copyFrom(info.bufferForKeyStart()))
-            .setKeyLimitBytes(ByteString.copyFrom(info.bufferForKeyLimit()))
+            .setKeyStart(new String(info.bufferForKeyStart().array()))
+            .setKeyLimit(new String(info.bufferForKeyLimit().array()))
             .setKeyCount(info.getKeyCount()).build();
     return JournalEntry.newBuilder().setCompletePartition(completePartition).build();
   }

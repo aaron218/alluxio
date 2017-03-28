@@ -48,8 +48,8 @@ import javax.annotation.concurrent.ThreadSafe;
  * S3 FS {@link UnderFileSystem} implementation based on the jets3t library.
  */
 @ThreadSafe
-public final class S3UnderFileSystem extends ObjectUnderFileSystem {
-  private static final Logger LOG = LoggerFactory.getLogger(Constants.LOGGER_TYPE);
+public class S3UnderFileSystem extends ObjectUnderFileSystem {
+  private static final Logger LOG = LoggerFactory.getLogger(S3UnderFileSystem.class);
 
   /** Suffix for an empty file to flag it as a directory. */
   private static final String FOLDER_SUFFIX = "_$folder$";
@@ -267,6 +267,8 @@ public final class S3UnderFileSystem extends ObjectUnderFileSystem {
   protected ObjectListingChunk getObjectListingChunk(String key, boolean recursive)
       throws IOException {
     key = PathUtils.normalizePath(key, PATH_SEPARATOR);
+    // In case key is root (empty string) do not normalize prefix
+    key = key.equals(PATH_SEPARATOR) ? "" : key;
     String delimiter = recursive ? "" : PATH_SEPARATOR;
     StorageObjectsChunk chunk = getObjectListingChunk(key, delimiter, null);
     if (chunk != null) {
@@ -354,8 +356,7 @@ public final class S3UnderFileSystem extends ObjectUnderFileSystem {
     try {
       return new S3InputStream(mBucketName, key, mClient, options.getOffset());
     } catch (ServiceException e) {
-      LOG.error("Failed to open file: {}", key, e);
-      return null;
+      throw new IOException(e.getMessage());
     }
   }
 }

@@ -11,7 +11,6 @@
 
 package alluxio.client.netty;
 
-import alluxio.Constants;
 import alluxio.exception.ExceptionMessage;
 import alluxio.network.protocol.RPCMessage;
 import alluxio.network.protocol.RPCResponse;
@@ -33,7 +32,7 @@ import javax.annotation.concurrent.NotThreadSafe;
  */
 @NotThreadSafe
 public final class ClientHandler extends SimpleChannelInboundHandler<RPCMessage> {
-  private static final Logger LOG = LoggerFactory.getLogger(Constants.LOGGER_TYPE);
+  private static final Logger LOG = LoggerFactory.getLogger(ClientHandler.class);
 
   /**
    * The interface for listeners to implement to receive callbacks when messages are received.
@@ -67,9 +66,11 @@ public final class ClientHandler extends SimpleChannelInboundHandler<RPCMessage>
    * Adds a {@link ResponseListener} listener to the client handler.
    *
    * @param listener the listener to add
+   * @return the current handler
    */
-  public void addListener(ResponseListener listener) {
+  public ClientHandler addListener(ResponseListener listener) {
     mListeners.add(Preconditions.checkNotNull(listener));
+    return this;
   }
 
   /**

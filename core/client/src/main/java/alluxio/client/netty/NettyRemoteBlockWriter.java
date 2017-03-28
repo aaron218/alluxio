@@ -11,9 +11,8 @@
 
 package alluxio.client.netty;
 
-import alluxio.Constants;
 import alluxio.client.RemoteBlockWriter;
-import alluxio.client.block.BlockStoreContext;
+import alluxio.client.file.FileSystemContext;
 import alluxio.exception.ExceptionMessage;
 import alluxio.metrics.MetricsSystem;
 import alluxio.network.protocol.RPCBlockWriteRequest;
@@ -42,8 +41,9 @@ import javax.annotation.concurrent.ThreadSafe;
  */
 @NotThreadSafe
 public final class NettyRemoteBlockWriter implements RemoteBlockWriter {
-  private static final Logger LOG = LoggerFactory.getLogger(Constants.LOGGER_TYPE);
+  private static final Logger LOG = LoggerFactory.getLogger(NettyRemoteBlockWriter.class);
 
+  private FileSystemContext mContext;
   private boolean mOpen;
   private InetSocketAddress mAddress;
   private long mBlockId;
@@ -54,13 +54,16 @@ public final class NettyRemoteBlockWriter implements RemoteBlockWriter {
 
   /**
    * Creates a new {@link NettyRemoteBlockWriter}.
+   *
+   * @param context the file system context
    */
-  public NettyRemoteBlockWriter() {
+  public NettyRemoteBlockWriter(FileSystemContext context) {
     mOpen = false;
     mAddress = null;
     mBlockId = 0;
     mSessionId = 0;
     mWrittenBytes = 0;
+    mContext = context;
   }
 
   @Override
@@ -89,7 +92,7 @@ public final class NettyRemoteBlockWriter implements RemoteBlockWriter {
     ClientHandler clientHandler = null;
     Metrics.NETTY_BLOCK_WRITE_OPS.inc();
     try {
-      channel = BlockStoreContext.acquireNettyChannel(mAddress);
+      channel = mContext.acquireNettyChannel(mAddress);
       if (!(channel.pipeline().last() instanceof ClientHandler)) {
         channel.pipeline().addLast(new ClientHandler());
       }
@@ -142,7 +145,7 @@ public final class NettyRemoteBlockWriter implements RemoteBlockWriter {
         clientHandler.removeListeners();
       }
       if (channel != null) {
-        BlockStoreContext.releaseNettyChannel(mAddress, channel);
+        mContext.releaseNettyChannel(mAddress, channel);
       }
     }
   }

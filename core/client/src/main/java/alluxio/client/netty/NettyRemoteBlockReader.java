@@ -11,9 +11,8 @@
 
 package alluxio.client.netty;
 
-import alluxio.Constants;
 import alluxio.client.RemoteBlockReader;
-import alluxio.client.block.BlockStoreContext;
+import alluxio.client.file.FileSystemContext;
 import alluxio.exception.ExceptionMessage;
 import alluxio.metrics.MetricsSystem;
 import alluxio.network.protocol.RPCBlockReadRequest;
@@ -42,15 +41,19 @@ import javax.annotation.concurrent.ThreadSafe;
  */
 @NotThreadSafe
 public final class NettyRemoteBlockReader implements RemoteBlockReader {
-  private static final Logger LOG = LoggerFactory.getLogger(Constants.LOGGER_TYPE);
+  private static final Logger LOG = LoggerFactory.getLogger(NettyRemoteBlockReader.class);
 
+  private final FileSystemContext mContext;
   /** A reference to read response so we can explicitly release the resource after reading. */
   private RPCBlockReadResponse mReadResponse = null;
 
   /**
    * Creates a new {@link NettyRemoteBlockReader}.
+   * @param context the file system context
    */
-  public NettyRemoteBlockReader() {}
+  public NettyRemoteBlockReader(FileSystemContext context) {
+    mContext = context;
+  }
 
   @Override
   public ByteBuffer readRemoteBlock(InetSocketAddress address, long blockId, long offset,
@@ -59,7 +62,7 @@ public final class NettyRemoteBlockReader implements RemoteBlockReader {
     ClientHandler clientHandler = null;
     Metrics.NETTY_BLOCK_READ_OPS.inc();
     try {
-      channel = BlockStoreContext.acquireNettyChannel(address);
+      channel = mContext.acquireNettyChannel(address);
       if (!(channel.pipeline().last() instanceof ClientHandler)) {
         channel.pipeline().addLast(new ClientHandler());
       }
@@ -113,7 +116,7 @@ public final class NettyRemoteBlockReader implements RemoteBlockReader {
         clientHandler.removeListeners();
       }
       if (channel != null) {
-        BlockStoreContext.releaseNettyChannel(address, channel);
+        mContext.releaseNettyChannel(address, channel);
       }
     }
   }

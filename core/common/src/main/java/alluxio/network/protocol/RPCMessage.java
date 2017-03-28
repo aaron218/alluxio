@@ -12,6 +12,7 @@
 package alluxio.network.protocol;
 
 import alluxio.network.protocol.databuffer.DataBuffer;
+import alluxio.util.proto.ProtoMessage;
 
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
@@ -41,6 +42,14 @@ public abstract class RPCMessage implements EncodedMessage {
     RPC_FILE_READ_RESPONSE(6),
     RPC_FILE_WRITE_REQUEST(7),
     RPC_FILE_WRITE_RESPONSE(8),
+
+    // Tags lower than 100 are reserved since v1.4.0.
+    RPC_READ_REQUEST(100),
+    RPC_WRITE_REQUEST(101),
+    RPC_RESPONSE(102),
+    RPC_UFS_BLOCK_READ_REQUEST(103),
+
+    RPC_UNKNOWN(1000),
     ;
 
     private final int mId;
@@ -102,6 +111,14 @@ public abstract class RPCMessage implements EncodedMessage {
           return RPC_FILE_WRITE_REQUEST;
         case 8:
           return RPC_FILE_WRITE_RESPONSE;
+        case 100:
+          return RPC_READ_REQUEST;
+        case 101:
+          return RPC_WRITE_REQUEST;
+        case 102:
+          return RPC_RESPONSE;
+        case 103:
+          return RPC_UFS_BLOCK_READ_REQUEST;
         default:
           throw new IllegalArgumentException("Unknown RPCMessage type id. id: " + id);
       }
@@ -163,7 +180,7 @@ public abstract class RPCMessage implements EncodedMessage {
    * @param in the input {@link ByteBuf}
    * @return the decoded RPCMessage
    */
-  public static RPCMessage decodeMessage(RPCMessage.Type type, ByteBuf in) {
+  public static RPCMessage decodeMessage(Type type, ByteBuf in) {
     switch (type) {
       case RPC_ERROR_RESPONSE:
         return RPCErrorResponse.decode(in);
@@ -183,6 +200,14 @@ public abstract class RPCMessage implements EncodedMessage {
         return RPCFileWriteRequest.decode(in);
       case RPC_FILE_WRITE_RESPONSE:
         return RPCFileWriteResponse.decode(in);
+      case RPC_READ_REQUEST:
+        return RPCProtoMessage.decode(in, ProtoMessage.Type.READ_REQUEST);
+      case RPC_WRITE_REQUEST:
+        return RPCProtoMessage.decode(in, ProtoMessage.Type.WRITE_REQUEST);
+      case RPC_RESPONSE:
+        return RPCProtoMessage.decode(in, ProtoMessage.Type.RESPONSE);
+      case RPC_UFS_BLOCK_READ_REQUEST:
+        return RPCUnderFileSystemBlockReadRequest.decode(in);
       default:
         throw new IllegalArgumentException("Unknown RPCMessage type. type: " + type);
     }

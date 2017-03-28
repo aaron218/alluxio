@@ -32,7 +32,8 @@ import java.util.List;
 import javax.annotation.concurrent.ThreadSafe;
 
 /**
- * Displays information for all directories and files directly under the path specified in args.
+ * Displays information for the path specified in args. Depends on different options, this command
+ * can also display the information for all directly children under the path, or recursively.
  */
 @ThreadSafe
 public final class LsCommand extends WithWildCardPathCommand {
@@ -43,6 +44,7 @@ public final class LsCommand extends WithWildCardPathCommand {
   /**
    * Formats the ls result string.
    *
+   * @param rawSize print raw sizes
    * @param acl whether security is enabled
    * @param isFolder whether this path is a file or a folder
    * @param permission permission string
@@ -54,7 +56,8 @@ public final class LsCommand extends WithWildCardPathCommand {
    * @param path path of the file or folder
    * @return the formatted string according to acl and isFolder
    */
-  public static String formatLsString(boolean acl, boolean isFolder, String permission,
+  public static String formatLsString(boolean rawSize, boolean acl, boolean isFolder, String
+      permission,
       String userName, String groupName, long size, long createTimeMs, boolean inMemory,
       String path) {
     String memoryState;
@@ -63,14 +66,22 @@ public final class LsCommand extends WithWildCardPathCommand {
     } else {
       memoryState = inMemory ? STATE_FILE_IN_MEMORY : STATE_FILE_NOT_IN_MEMORY;
     }
+    String sizeStr = rawSize ? String.valueOf(size) : FormatUtils.getSizeFromBytes(size);
     if (acl) {
       return String.format(Constants.LS_FORMAT, permission, userName, groupName,
-          FormatUtils.getSizeFromBytes(size), CommandUtils.convertMsToDate(createTimeMs),
+          sizeStr, CommandUtils.convertMsToDate(createTimeMs),
           memoryState, path);
     } else {
-      return String.format(Constants.LS_FORMAT_NO_ACL, FormatUtils.getSizeFromBytes(size),
+      return String.format(Constants.LS_FORMAT_NO_ACL, sizeStr,
           CommandUtils.convertMsToDate(createTimeMs), memoryState, path);
     }
+  }
+
+  private void printLsString(URIStatus status, boolean rawSize) {
+    System.out.print(formatLsString(rawSize, SecurityUtils.isSecurityEnabled(),
+        status.isFolder(), FormatUtils.formatMode((short) status.getMode(), status.isFolder()),
+        status.getOwner(), status.getGroup(), status.getLength(), status.getCreationTimeMs(),
+        100 == status.getInMemoryPercentage(), status.getPath()));
   }
 
   /**
@@ -95,7 +106,12 @@ public final class LsCommand extends WithWildCardPathCommand {
 
   @Override
   protected Options getOptions() {
-    return new Options().addOption(RECURSIVE_OPTION).addOption(FORCE_OPTION);
+    return new Options()
+        .addOption(RECURSIVE_OPTION)
+        .addOption(FORCE_OPTION)
+        .addOption(LIST_DIR_AS_FILE_OPTION)
+        .addOption(LIST_PINNED_FILES_OPTION)
+        .addOption(LIST_RAW_SIZE_OPTION);
   }
 
   /**
@@ -103,31 +119,41 @@ public final class LsCommand extends WithWildCardPathCommand {
    *
    * @param path The {@link AlluxioURI} path as the input of the command
    * @param recursive Whether list the path recursively
+   * @param dirAsFile list the directory status as a plain file
+   * @param rawSize print raw sizes
    * @throws AlluxioException when Alluxio exception occurs
    * @throws IOException when non-Alluxio exception occurs
    */
-  private void ls(AlluxioURI path, boolean recursive, boolean forceLoadMetadata)
+  private void ls(AlluxioURI path, boolean recursive, boolean forceLoadMetadata, boolean dirAsFile,
+                  boolean rawSize, boolean pinnedOnly)
       throws AlluxioException, IOException {
+    if (dirAsFile) {
+      URIStatus status = mFileSystem.getStatus(path);
+      if (pinnedOnly && !status.isPinned()) {
+        return;
+      }
+      printLsString(status, rawSize);
+      return;
+    }
+
     ListStatusOptions options = ListStatusOptions.defaults();
     if (forceLoadMetadata) {
       options.setLoadMetadataType(LoadMetadataType.Always);
     }
     List<URIStatus> statuses = listStatusSortedByIncreasingCreationTime(path, options);
     for (URIStatus status : statuses) {
-      System.out.print(formatLsString(SecurityUtils.isSecurityEnabled(), status.isFolder(),
-          FormatUtils.formatMode((short) status.getMode(), status.isFolder()), status.getOwner(),
-          status.getGroup(), status.getLength(), status.getCreationTimeMs(),
-          100 == status.getInMemoryPercentage(), status.getPath()));
+      if (!pinnedOnly || status.isPinned()) {
+        printLsString(status, rawSize);
+      }
       if (recursive && status.isFolder()) {
         ls(new AlluxioURI(path.getScheme(), path.getAuthority(), status.getPath()), true,
-            forceLoadMetadata);
+            forceLoadMetadata, false, rawSize, pinnedOnly);
       }
     }
   }
 
   private List<URIStatus> listStatusSortedByIncreasingCreationTime(AlluxioURI path,
-      ListStatusOptions options)
-      throws AlluxioException, IOException {
+      ListStatusOptions options) throws AlluxioException, IOException {
     List<URIStatus> statuses = mFileSystem.listStatus(path, options);
     Collections.sort(statuses, new Comparator<URIStatus>() {
       @Override
@@ -148,18 +174,22 @@ public final class LsCommand extends WithWildCardPathCommand {
 
   @Override
   public void runCommand(AlluxioURI path, CommandLine cl) throws AlluxioException, IOException {
-    ls(path, cl.hasOption("R"), cl.hasOption("f"));
+    ls(path, cl.hasOption("R"), cl.hasOption("f"), cl.hasOption("d"), cl.hasOption("raw"),
+        cl.hasOption("p"));
   }
 
   @Override
   public String getUsage() {
-    return "ls [-R] [-f] <path>";
+    return "ls [-d|-f|-p|-R|-raw] <path>";
   }
 
   @Override
   public String getDescription() {
     return "Displays information for all files and directories directly under the specified path."
+        + " Specify -d to list directories as plain files."
+        + " Specify -f to force loading files in the directory."
+        + " Specify -p to list all the pinned files."
         + " Specify -R to display files and directories recursively."
-        + " Specify -f to force loading files in the directory.";
+        + " Specify -raw to print raw sizes.";
   }
 }

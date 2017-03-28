@@ -16,11 +16,11 @@ import alluxio.IntegrationTestConstants;
 import alluxio.LocalAlluxioClusterResource;
 import alluxio.PropertyKey;
 import alluxio.client.block.AlluxioBlockStore;
-import alluxio.client.block.BlockStoreContext;
 import alluxio.client.block.RemoteBlockInStream;
 import alluxio.client.file.FileInStream;
 import alluxio.client.file.FileOutStream;
 import alluxio.client.file.FileSystem;
+import alluxio.client.file.FileSystemContext;
 import alluxio.client.file.options.CreateFileOptions;
 import alluxio.client.file.options.InStreamOptions;
 import alluxio.client.file.options.OpenFileOptions;
@@ -75,18 +75,24 @@ public class RemoteBlockInStreamIntegrationTest {
     // creates a new instance of RemoteBlockInStreamTest for each network type
     List<Object[]> list = new ArrayList<>();
     list.add(new Object[] {IntegrationTestConstants.NETTY_DATA_SERVER,
-        IntegrationTestConstants.MAPPED_TRANSFER, IntegrationTestConstants.NETTY_BLOCK_READER});
+        IntegrationTestConstants.MAPPED_TRANSFER});
     list.add(new Object[] {IntegrationTestConstants.NETTY_DATA_SERVER,
-        IntegrationTestConstants.FILE_CHANNEL_TRANSFER,
-        IntegrationTestConstants.NETTY_BLOCK_READER});
+        IntegrationTestConstants.FILE_CHANNEL_TRANSFER});
     return list;
   }
 
-  public RemoteBlockInStreamIntegrationTest(String dataServer, String transferType, String reader) {
+  /**
+   * Constructor for {@link RemoteBlockInStreamIntegrationTest}.
+   *
+   * @param dataServer the address of the worker's data server
+   * @param transferType the file transfer type used by the worker
+   */
+  public RemoteBlockInStreamIntegrationTest(String dataServer, String transferType) {
     mLocalAlluxioClusterResource = new LocalAlluxioClusterResource.Builder()
         .setProperty(PropertyKey.WORKER_DATA_SERVER_CLASS, dataServer)
         .setProperty(PropertyKey.WORKER_NETWORK_NETTY_FILE_TRANSFER_TYPE, transferType)
         .setProperty(PropertyKey.USER_BLOCK_REMOTE_READ_BUFFER_SIZE_BYTES, "100")
+        .setProperty(PropertyKey.USER_UFS_BLOCK_READ_CONCURRENCY_MAX, 2)
         .build();
   }
 
@@ -126,9 +132,9 @@ public class RemoteBlockInStreamIntegrationTest {
       Assert.assertTrue(BufferUtils.equalIncreasingByteArray(k, ret));
       is.close();
       if (k == 0) {
-        Assert.assertTrue(mFileSystem.getStatus(uri).getInMemoryPercentage() == 100);
+        Assert.assertEquals(100, mFileSystem.getStatus(uri).getInMemoryPercentage());
       } else {
-        Assert.assertFalse(mFileSystem.getStatus(uri).getInMemoryPercentage() == 100);
+        Assert.assertNotEquals(100, mFileSystem.getStatus(uri).getInMemoryPercentage());
       }
 
       is = mFileSystem.openFile(uri, mReadCache);
@@ -144,7 +150,7 @@ public class RemoteBlockInStreamIntegrationTest {
       Assert.assertEquals(cnt, k);
       Assert.assertTrue(BufferUtils.equalIncreasingByteArray(k, ret));
       is.close();
-      Assert.assertTrue(mFileSystem.getStatus(uri).getInMemoryPercentage() == 100);
+      Assert.assertEquals(100, mFileSystem.getStatus(uri).getInMemoryPercentage());
 
       is = mFileSystem.openFile(uri, mReadCache);
       ret = new byte[k];
@@ -159,7 +165,7 @@ public class RemoteBlockInStreamIntegrationTest {
       Assert.assertEquals(cnt, k);
       Assert.assertTrue(BufferUtils.equalIncreasingByteArray(k, ret));
       is.close();
-      Assert.assertTrue(mFileSystem.getStatus(uri).getInMemoryPercentage() == 100);
+      Assert.assertEquals(100, mFileSystem.getStatus(uri).getInMemoryPercentage());
     }
   }
 
@@ -248,10 +254,11 @@ public class RemoteBlockInStreamIntegrationTest {
       FileSystemTestUtils.createByteFile(mFileSystem, uri, mWriteAlluxio, k);
 
       long blockId = mFileSystem.getStatus(uri).getBlockIds().get(0);
-      BlockInfo info = new AlluxioBlockStore().getInfo(blockId);
+      AlluxioBlockStore blockStore = AlluxioBlockStore.create();
+      BlockInfo info = blockStore.getInfo(blockId);
       WorkerNetAddress workerAddr = info.getLocations().get(0).getWorkerAddress();
-      RemoteBlockInStream is = new RemoteBlockInStream(info.getBlockId(), info.getLength(),
-          workerAddr, BlockStoreContext.get(), InStreamOptions.defaults());
+      RemoteBlockInStream is = RemoteBlockInStream.create(info.getBlockId(), info.getLength(),
+          workerAddr, FileSystemContext.INSTANCE, InStreamOptions.defaults());
       byte[] ret = new byte[k];
       int value = is.read();
       int cnt = 0;
@@ -279,10 +286,10 @@ public class RemoteBlockInStreamIntegrationTest {
       FileSystemTestUtils.createByteFile(mFileSystem, uri, mWriteAlluxio, k);
 
       long blockId = mFileSystem.getStatus(uri).getBlockIds().get(0);
-      BlockInfo info = new AlluxioBlockStore().getInfo(blockId);
+      BlockInfo info = AlluxioBlockStore.create().getInfo(blockId);
       WorkerNetAddress workerAddr = info.getLocations().get(0).getWorkerAddress();
-      RemoteBlockInStream is = new RemoteBlockInStream(info.getBlockId(), info.getLength(),
-          workerAddr, BlockStoreContext.get(), InStreamOptions.defaults());
+      RemoteBlockInStream is = RemoteBlockInStream.create(info.getBlockId(), info.getLength(),
+          workerAddr, FileSystemContext.INSTANCE, InStreamOptions.defaults());
       byte[] ret = new byte[k];
       int start = 0;
       while (start < k) {
@@ -306,10 +313,10 @@ public class RemoteBlockInStreamIntegrationTest {
       FileSystemTestUtils.createByteFile(mFileSystem, uri, mWriteAlluxio, k);
 
       long blockId = mFileSystem.getStatus(uri).getBlockIds().get(0);
-      BlockInfo info = new AlluxioBlockStore().getInfo(blockId);
+      BlockInfo info = AlluxioBlockStore.create().getInfo(blockId);
       WorkerNetAddress workerAddr = info.getLocations().get(0).getWorkerAddress();
-      RemoteBlockInStream is = new RemoteBlockInStream(info.getBlockId(), info.getLength(),
-          workerAddr, BlockStoreContext.get(), InStreamOptions.defaults());
+      RemoteBlockInStream is = RemoteBlockInStream.create(info.getBlockId(), info.getLength(),
+          workerAddr, FileSystemContext.INSTANCE, InStreamOptions.defaults());
       byte[] ret = new byte[k / 2];
       int start = 0;
       while (start < k / 2) {
@@ -418,7 +425,7 @@ public class RemoteBlockInStreamIntegrationTest {
       Assert.assertEquals(k / 2, is.skip(k / 2));
       Assert.assertEquals(k / 2, is.read());
       is.close();
-      Assert.assertTrue(mFileSystem.getStatus(uri).getInMemoryPercentage() == 100);
+      Assert.assertEquals(100, mFileSystem.getStatus(uri).getInMemoryPercentage());
 
       if (k >= 3) {
         is = mFileSystem.openFile(uri, mReadCache);
@@ -525,11 +532,11 @@ public class RemoteBlockInStreamIntegrationTest {
       HeartbeatScheduler.execute(HeartbeatContext.WORKER_BLOCK_SYNC);
 
       long blockId = mFileSystem.getStatus(uri).getBlockIds().get(0);
-      BlockInfo info = new AlluxioBlockStore().getInfo(blockId);
+      BlockInfo info = AlluxioBlockStore.create().getInfo(blockId);
 
       WorkerNetAddress workerAddr = info.getLocations().get(0).getWorkerAddress();
-      RemoteBlockInStream is = new RemoteBlockInStream(info.getBlockId(), info.getLength(),
-          workerAddr, BlockStoreContext.get(), InStreamOptions.defaults());
+      RemoteBlockInStream is = RemoteBlockInStream.create(info.getBlockId(), info.getLength(),
+          workerAddr, FileSystemContext.INSTANCE, InStreamOptions.defaults());
       Assert.assertEquals(0, is.read());
       mFileSystem.delete(uri);
       HeartbeatScheduler.execute(HeartbeatContext.WORKER_BLOCK_SYNC);
@@ -545,8 +552,8 @@ public class RemoteBlockInStreamIntegrationTest {
       // Try to create an in stream again, and it should fail.
       RemoteBlockInStream is2 = null;
       try {
-        is2 = new RemoteBlockInStream(info.getBlockId(), info.getLength(), workerAddr,
-            BlockStoreContext.get(), InStreamOptions.defaults());
+        is2 = RemoteBlockInStream.create(info.getBlockId(), info.getLength(), workerAddr,
+            FileSystemContext.INSTANCE, InStreamOptions.defaults());
       } catch (IOException e) {
         Assert.assertTrue(e.getCause() instanceof BlockDoesNotExistException);
       } finally {

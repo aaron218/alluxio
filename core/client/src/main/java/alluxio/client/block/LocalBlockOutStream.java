@@ -12,8 +12,8 @@
 package alluxio.client.block;
 
 import alluxio.Configuration;
-import alluxio.Constants;
 import alluxio.PropertyKey;
+import alluxio.client.file.FileSystemContext;
 import alluxio.client.file.options.OutStreamOptions;
 import alluxio.exception.AlluxioException;
 import alluxio.exception.ExceptionMessage;
@@ -24,8 +24,6 @@ import alluxio.worker.block.io.LocalFileBlockWriter;
 
 import com.codahale.metrics.Counter;
 import com.google.common.io.Closer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -39,7 +37,6 @@ import javax.annotation.concurrent.ThreadSafe;
  */
 @NotThreadSafe
 public final class LocalBlockOutStream extends BufferedBlockOutStream {
-  private static final Logger LOG = LoggerFactory.getLogger(Constants.LOGGER_TYPE);
   private final Closer mCloser;
   private final BlockWorkerClient mBlockWorkerClient;
   private final LocalFileBlockWriter mWriter;
@@ -51,25 +48,26 @@ public final class LocalBlockOutStream extends BufferedBlockOutStream {
    * @param blockId the block id
    * @param blockSize the block size
    * @param workerNetAddress the address of the local worker
-   * @param blockStoreContext the block store context
+   * @param context the file system context
    * @param options the options
    * @throws IOException if an I/O error occurs
    */
   public LocalBlockOutStream(long blockId,
       long blockSize,
       WorkerNetAddress workerNetAddress,
-      BlockStoreContext blockStoreContext,
+      FileSystemContext context,
       OutStreamOptions options) throws IOException {
-    super(blockId, blockSize, blockStoreContext);
-    if (!NetworkAddressUtils.getLocalHostName().equals(workerNetAddress.getHost())) {
+    super(blockId, blockSize, context);
+    if (!NetworkAddressUtils.getClientHostName().equals(workerNetAddress.getHost())) {
       throw new IOException(ExceptionMessage.NO_LOCAL_WORKER.getMessage(workerNetAddress));
     }
 
     mCloser = Closer.create();
     try {
-      mBlockWorkerClient = mCloser.register(mContext.createWorkerClient(workerNetAddress));
+      mBlockWorkerClient = mCloser.register(context.createBlockWorkerClient(workerNetAddress));
       long initialSize = Configuration.getBytes(PropertyKey.USER_FILE_BUFFER_BYTES);
-      String blockPath = mBlockWorkerClient.requestBlockLocation(mBlockId, initialSize);
+      String blockPath =
+          mBlockWorkerClient.requestBlockLocation(mBlockId, initialSize, options.getWriteTier());
       mReservedBytes += initialSize;
       mWriter = new LocalFileBlockWriter(blockPath);
       mCloser.register(mWriter);

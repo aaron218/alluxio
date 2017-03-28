@@ -11,6 +11,7 @@
 
 package alluxio.client;
 
+import alluxio.client.file.FileSystemContext;
 import alluxio.client.netty.NettyRemoteBlockReader;
 
 import java.io.Closeable;
@@ -32,10 +33,11 @@ public interface RemoteBlockReader extends Closeable {
     /**
      * Factory for {@link RemoteBlockReader}.
      *
+     * @param context the file system context
      * @return a new instance of {@link RemoteBlockReader}
      */
-    public static RemoteBlockReader create() {
-      return new NettyRemoteBlockReader();
+    public static RemoteBlockReader create(FileSystemContext context) {
+      return new NettyRemoteBlockReader(context);
     }
   }
 
@@ -51,6 +53,7 @@ public interface RemoteBlockReader extends Closeable {
    * @return a byte buffer containing the remote data block
    * @throws IOException if the remote server is not reachable or responds with failures
    */
+  // TODO(peis): Use options idiom (ALLUXIO-2579).
   ByteBuffer readRemoteBlock(InetSocketAddress address, long blockId, long offset,
       long length, long lockId, long sessionId) throws IOException;
 }

@@ -11,7 +11,8 @@
 
 package alluxio.network.connection;
 
-import alluxio.Constants;
+import alluxio.Configuration;
+import alluxio.PropertyKey;
 import alluxio.RuntimeConstants;
 import alluxio.exception.ExceptionMessage;
 import alluxio.resource.DynamicResourcePool;
@@ -21,12 +22,15 @@ import alluxio.security.authentication.TransportProvider;
 import alluxio.thrift.AlluxioService;
 import alluxio.util.ThreadFactoryUtils;
 
+import com.google.common.base.Preconditions;
 import org.apache.thrift.TException;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TMultiplexedProtocol;
 import org.apache.thrift.protocol.TProtocol;
 import org.apache.thrift.transport.TTransport;
 import org.apache.thrift.transport.TTransportException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -36,6 +40,7 @@ import java.util.regex.Pattern;
 
 import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.ThreadSafe;
+import javax.security.auth.Subject;
 
 /**
  * A pool to manage Alluxio thrift clients.
@@ -57,11 +62,14 @@ import javax.annotation.concurrent.ThreadSafe;
 @ThreadSafe
 public abstract class ThriftClientPool<T extends AlluxioService.Client>
     extends DynamicResourcePool<T> {
+  private static final Logger LOG = LoggerFactory.getLogger(ThriftClientPool.class);
+
   private final TransportProvider mTransportProvider;
   private final String mServiceName;
   private final long mServiceVersion;
   private final InetSocketAddress mAddress;
   private final long mGcThresholdMs;
+  private final Subject mParentSubject;
 
   private static final int THRIFT_CLIENT_POOL_GC_THREADPOOL_SIZE = 5;
   private static final ScheduledExecutorService GC_EXECUTOR =
@@ -71,8 +79,12 @@ public abstract class ThriftClientPool<T extends AlluxioService.Client>
   @GuardedBy("this")
   private Long mServerVersionFound = null;
 
-  private static final int CONNECTION_OPEN_RETRY_BASE_SLEEP_MS = 50;
-  private static final int CONNECTION_OPEN_RETRY_MAX = 5;
+  private static final int BASE_SLEEP_MS =
+      Configuration.getInt(PropertyKey.USER_RPC_RETRY_BASE_SLEEP_MS);
+  private static final int MAX_SLEEP_MS =
+      Configuration.getInt(PropertyKey.USER_RPC_RETRY_MAX_SLEEP_MS);
+  private static final int RPC_MAX_NUM_RETRY =
+      Configuration.getInt(PropertyKey.USER_RPC_RETRY_MAX_NUM_RETRY);
 
   /**
    * The patterns of exception message when client and server transport frame sizes do not match
@@ -86,6 +98,7 @@ public abstract class ThriftClientPool<T extends AlluxioService.Client>
   /**
    * Creates a thrift client pool instance with a minimum capacity of 1.
    *
+   * @param subject the parent subject, set to null if not present
    * @param serviceName the service name (e.g. BlockWorkerClient)
    * @param serviceVersion the service version
    * @param address the server address
@@ -93,14 +106,15 @@ public abstract class ThriftClientPool<T extends AlluxioService.Client>
    * @param gcThresholdMs when a channel is older than this threshold and the pool's capacity
    *        is above the minimum capacity (1), it is closed and removed from the pool.
    */
-  public ThriftClientPool(String serviceName, long serviceVersion, InetSocketAddress address,
-      int maxCapacity, long gcThresholdMs) {
+  public ThriftClientPool(Subject subject, String serviceName, long serviceVersion,
+      InetSocketAddress address, int maxCapacity, long gcThresholdMs) {
     super(Options.defaultOptions().setMaxCapacity(maxCapacity).setGcExecutor(GC_EXECUTOR));
     mTransportProvider = TransportProvider.Factory.create();
     mServiceName = serviceName;
     mServiceVersion = serviceVersion;
     mAddress = address;
     mGcThresholdMs = gcThresholdMs;
+    mParentSubject = subject;
   }
 
   /**
@@ -135,14 +149,16 @@ public abstract class ThriftClientPool<T extends AlluxioService.Client>
    */
   @Override
   protected T createNewResource() throws IOException {
-    TTransport transport = mTransportProvider.getClientTransport(mAddress);
+    TTransport transport = mTransportProvider.getClientTransport(mParentSubject, mAddress);
     TProtocol binaryProtocol = new TBinaryProtocol(transport);
     T client = createThriftClient(new TMultiplexedProtocol(binaryProtocol, mServiceName));
 
-    RetryPolicy retry =
-        new ExponentialBackoffRetry(CONNECTION_OPEN_RETRY_BASE_SLEEP_MS, Constants.SECOND_MS,
-            CONNECTION_OPEN_RETRY_MAX);
-    while (true) {
+    TException exception;
+    RetryPolicy retryPolicy =
+        new ExponentialBackoffRetry(BASE_SLEEP_MS, MAX_SLEEP_MS, RPC_MAX_NUM_RETRY);
+    do {
+      LOG.info("Alluxio client (version {}) is trying to connect with {} {} @ {}",
+          RuntimeConstants.VERSION, mServiceName, mAddress);
       try {
         if (!transport.isOpen()) {
           transport.open();
@@ -150,10 +166,9 @@ public abstract class ThriftClientPool<T extends AlluxioService.Client>
         if (transport.isOpen()) {
           checkVersion(client);
         }
+        LOG.info("Client registered with {} @ {}", mServiceName, mAddress);
+        return client;
       } catch (TTransportException e) {
-        LOG.error(
-            "Failed to connect (" + retry.getRetryCount() + ") to " + getServiceNameForLogging()
-                + " @ " + mAddress, e);
         if (e.getCause() instanceof java.net.SocketTimeoutException) {
           // Do not retry if socket timeout.
           String message = "Thrift transport open times out. Please check whether the "
@@ -161,14 +176,15 @@ public abstract class ThriftClientPool<T extends AlluxioService.Client>
               + "is not able to connect to servers with SIMPLE security mode.";
           throw new IOException(message, e);
         }
-        if (!retry.attemptRetry()) {
-          throw new IOException(e);
-        }
+        LOG.warn("Failed to connect ({}) to {} @ {}: {}", retryPolicy.getRetryCount(), mServiceName,
+            mAddress, e.getMessage());
+        exception = e;
       }
-      break;
-    }
-    LOG.info("Created a new thrift client {}", client.toString());
-    return client;
+    } while (retryPolicy.attemptRetry());
+
+    LOG.error("Failed after " + retryPolicy.getRetryCount() + " retries.");
+    Preconditions.checkNotNull(exception);
+    throw new IOException(exception);
   }
 
   /**

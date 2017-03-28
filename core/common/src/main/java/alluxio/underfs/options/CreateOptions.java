@@ -12,7 +12,7 @@
 package alluxio.underfs.options;
 
 import alluxio.annotation.PublicApi;
-import alluxio.security.authorization.Permission;
+import alluxio.security.authorization.Mode;
 
 import com.google.common.base.Objects;
 
@@ -24,11 +24,16 @@ import javax.annotation.concurrent.NotThreadSafe;
 @PublicApi
 @NotThreadSafe
 public final class CreateOptions {
+  // Determine whether to create any necessary but nonexistent parent directories.
+  // When setting permissions, this option should be = false to remain in sync w/ master
+  private boolean mCreateParent;
+
   // Ensure writes are not readable till close.
   private boolean mEnsureAtomic;
 
-  // Permission to set for the file being created.
-  private Permission mPermission;
+  private String mOwner;
+  private String mGroup;
+  private Mode mMode;
 
   /**
    * @return the default {@link CreateOptions}
@@ -41,15 +46,39 @@ public final class CreateOptions {
    * Constructs a default {@link CreateOptions}.
    */
   private CreateOptions() {
+    mCreateParent = false;
     mEnsureAtomic = true;
-    mPermission = Permission.defaults().applyFileUMask();
+    mOwner = "";
+    mGroup = "";
+    mMode = Mode.defaults().applyFileUMask();
   }
 
   /**
-   * @return the permission
+   * @return whether to create any necessary but nonexistent parent directories
    */
-  public Permission getPermission() {
-    return mPermission;
+  public boolean getCreateParent() {
+    return mCreateParent;
+  }
+
+  /**
+   * @return the owner
+   */
+  public String getOwner() {
+    return mOwner;
+  }
+
+  /**
+   * @return the group
+   */
+  public String getGroup() {
+    return mGroup;
+  }
+
+  /**
+   * @return the mode
+   */
+  public Mode getMode() {
+    return mMode;
   }
 
   /**
@@ -60,12 +89,24 @@ public final class CreateOptions {
   }
 
   /**
+   * Sets option to force creation of parent directories. If true, any necessary but nonexistent
+   * parent directories are created. If false, the behavior is implementation dependent.
+   *
+   * @param createParent option to force parent directory creation
+   * @return the updated object
+   */
+  public CreateOptions setCreateParent(boolean createParent) {
+    mCreateParent = createParent;
+    return this;
+  }
+
+  /**
    * Set atomicity guarantees. When true, writes to the created stream must become readable all at
    * once or not at all. The destination path is created only after closing the given stream. When,
    * false the stream may or may not be atomic.
    *
    * @param atomic whether to ensure created stream is atomic
-   * @return the updated option object
+   * @return the updated object
    */
   public CreateOptions setEnsureAtomic(boolean atomic) {
     mEnsureAtomic = atomic;
@@ -73,13 +114,29 @@ public final class CreateOptions {
   }
 
   /**
-   * Sets the permission.
-   *
-   * @param permission the permission stats to set
-   * @return the updated option object
+   * @param owner the owner to set
+   * @return the updated object
    */
-  public CreateOptions setPermission(Permission permission) {
-    mPermission = permission;
+  public CreateOptions setOwner(String owner) {
+    mOwner = owner;
+    return this;
+  }
+
+  /**
+   * @param group the group to set
+   * @return the updated object
+   */
+  public CreateOptions setGroup(String group) {
+    mGroup = group;
+    return this;
+  }
+
+  /**
+   * @param mode the mode to set
+   * @return the updated object
+   */
+  public CreateOptions setMode(Mode mode) {
+    mMode = mode;
     return this;
   }
 
@@ -92,20 +149,26 @@ public final class CreateOptions {
       return false;
     }
     CreateOptions that = (CreateOptions) o;
-    return (mEnsureAtomic == that.mEnsureAtomic)
-        && Objects.equal(mPermission, that.mPermission);
+    return (mCreateParent == that.mCreateParent)
+        && (mEnsureAtomic == that.mEnsureAtomic)
+        && Objects.equal(mOwner, that.mOwner)
+        && Objects.equal(mGroup, that.mGroup)
+        && Objects.equal(mMode, that.mMode);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(mEnsureAtomic, mPermission);
+    return Objects.hashCode(mCreateParent, mEnsureAtomic, mOwner, mGroup, mMode);
   }
 
   @Override
   public String toString() {
     return Objects.toStringHelper(this)
+        .add("createParent", mCreateParent)
         .add("ensureAtomic", mEnsureAtomic)
-        .add("permission", mPermission)
+        .add("owner", mOwner)
+        .add("group", mGroup)
+        .add("mode", mMode)
         .toString();
   }
 }

@@ -11,9 +11,8 @@
 
 package alluxio.client.netty;
 
-import alluxio.Constants;
 import alluxio.client.UnderFileSystemFileWriter;
-import alluxio.client.block.BlockStoreContext;
+import alluxio.client.file.FileSystemContext;
 import alluxio.exception.ExceptionMessage;
 import alluxio.metrics.MetricsSystem;
 import alluxio.network.protocol.RPCErrorResponse;
@@ -44,12 +43,17 @@ import javax.annotation.concurrent.ThreadSafe;
  */
 @NotThreadSafe
 public final class NettyUnderFileSystemFileWriter implements UnderFileSystemFileWriter {
-  private static final Logger LOG = LoggerFactory.getLogger(Constants.LOGGER_TYPE);
+  private static final Logger LOG = LoggerFactory.getLogger(NettyUnderFileSystemFileWriter.class);
+
+  private final FileSystemContext mContext;
 
   /**
    * Constructor for a Netty based writer to an under file system file on a worker.
+   * @param context the file system context
    */
-  public NettyUnderFileSystemFileWriter() {}
+  public NettyUnderFileSystemFileWriter(FileSystemContext context) {
+    mContext = context;
+  }
 
   @Override
   public void write(InetSocketAddress address, long ufsFileId, long fileOffset, byte[] source,
@@ -58,7 +62,7 @@ public final class NettyUnderFileSystemFileWriter implements UnderFileSystemFile
     ClientHandler clientHandler = null;
     Metrics.NETTY_UFS_WRITE_OPS.inc();
     try {
-      channel = BlockStoreContext.acquireNettyChannel(address);
+      channel = mContext.acquireNettyChannel(address);
       if (!(channel.pipeline().last() instanceof ClientHandler)) {
         channel.pipeline().addLast(new ClientHandler());
       }
@@ -111,7 +115,7 @@ public final class NettyUnderFileSystemFileWriter implements UnderFileSystemFile
         clientHandler.removeListeners();
       }
       if (channel != null) {
-        BlockStoreContext.releaseNettyChannel(address, channel);
+        mContext.releaseNettyChannel(address, channel);
       }
     }
   }

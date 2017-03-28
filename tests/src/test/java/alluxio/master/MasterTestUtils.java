@@ -17,30 +17,43 @@ import alluxio.PropertyKey;
 import alluxio.master.block.BlockMaster;
 import alluxio.master.file.FileSystemMaster;
 import alluxio.master.journal.JournalFactory;
+import alluxio.master.journal.MutableJournal;
 import alluxio.util.CommonUtils;
+import alluxio.util.WaitForOptions;
 
 import com.google.common.base.Function;
 
-import java.io.IOException;
+import java.net.URI;
 
 public class MasterTestUtils {
-  public static FileSystemMaster createLeaderFileSystemMasterFromJournal()
-      throws IOException {
+
+  /**
+   * Creates a new {@link FileSystemMaster} from journal.
+   *
+   * @return a new {@link FileSystemMaster}
+   */
+  public static FileSystemMaster createLeaderFileSystemMasterFromJournal() throws Exception {
     String masterJournal = Configuration.get(PropertyKey.MASTER_JOURNAL_FOLDER);
-    JournalFactory journalFactory = new JournalFactory.ReadWrite(masterJournal);
-    BlockMaster blockMaster = new BlockMaster(journalFactory);
-    FileSystemMaster fsMaster = new FileSystemMaster(blockMaster, journalFactory);
+    MasterRegistry registry = new MasterRegistry();
+    JournalFactory factory = new MutableJournal.Factory(new URI(masterJournal));
+    BlockMaster blockMaster = new BlockMaster(registry, factory);
+    FileSystemMaster fsMaster = new FileSystemMaster(registry, factory);
     blockMaster.start(true);
     fsMaster.start(true);
     return fsMaster;
   }
 
-  public static FileSystemMaster createStandbyFileSystemMasterFromJournal()
-      throws IOException {
+  /**
+   * Creates a new standby {@link FileSystemMaster} from journal.
+   *
+   * @return a new {@link FileSystemMaster}
+   */
+  public static FileSystemMaster createStandbyFileSystemMasterFromJournal() throws Exception {
     String masterJournal = Configuration.get(PropertyKey.MASTER_JOURNAL_FOLDER);
-    JournalFactory journalFactory = new JournalFactory.ReadWrite(masterJournal);
-    BlockMaster blockMaster = new BlockMaster(journalFactory);
-    FileSystemMaster fsMaster = new FileSystemMaster(blockMaster, journalFactory);
+    MasterRegistry registry = new MasterRegistry();
+    JournalFactory factory = new MutableJournal.Factory(new URI(masterJournal));
+    BlockMaster blockMaster = new BlockMaster(registry, factory);
+    FileSystemMaster fsMaster = new FileSystemMaster(registry, factory);
     blockMaster.start(false);
     fsMaster.start(false);
     return fsMaster;
@@ -58,6 +71,6 @@ public class MasterTestUtils {
         return master.getStartupConsistencyCheck().getStatus()
             == FileSystemMaster.StartupConsistencyCheck.Status.COMPLETE;
       }
-    }, Constants.MINUTE_MS);
+    }, WaitForOptions.defaults().setTimeout(Constants.MINUTE_MS));
   }
 }
