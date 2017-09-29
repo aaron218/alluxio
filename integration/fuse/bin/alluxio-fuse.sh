@@ -10,7 +10,7 @@
 # See the NOTICE file distributed with this work for information regarding copyright ownership.
 #
 
-SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink "$0" || echo "$0")")"; pwd)"
 
 get_env () {
   DEFAULT_LIBEXEC_DIR="${SCRIPT_DIR}"/../../../libexec
@@ -19,6 +19,7 @@ get_env () {
 
   ALLUXIO_FUSE_JAR=${SCRIPT_DIR}/../target/alluxio-integration-fuse-${VERSION}-jar-with-dependencies.jar
   FUSE_MAX_WRITE=131072
+  CLASSPATH=${CLASSPATH}:${ALLUXIO_FUSE_JAR}
 }
 
 check_java_version () {
@@ -59,7 +60,7 @@ mount_fuse() {
   fi
   echo "Starting alluxio-fuse on local host."
   local mount_point=$1
-  (nohup "${JAVA}" -cp ${ALLUXIO_FUSE_JAR} ${JAVA_OPTS} ${ALLUXIO_FUSE_JAVA_OPTS} \
+  (nohup "${JAVA}" -cp ${CLASSPATH} ${JAVA_OPTS} ${ALLUXIO_FUSE_JAVA_OPTS} \
     alluxio.fuse.AlluxioFuse \
     -m ${mount_point} \
     -o big_writes > ${ALLUXIO_LOGS_DIR}/fuse.out 2>&1) &

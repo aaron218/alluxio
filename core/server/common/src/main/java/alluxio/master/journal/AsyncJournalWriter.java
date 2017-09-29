@@ -14,6 +14,7 @@ package alluxio.master.journal;
 import alluxio.Configuration;
 import alluxio.PropertyKey;
 import alluxio.proto.journal.Journal.JournalEntry;
+import alluxio.resource.LockResource;
 
 import com.google.common.base.Preconditions;
 
@@ -29,7 +30,7 @@ import javax.annotation.concurrent.ThreadSafe;
  */
 @ThreadSafe
 public final class AsyncJournalWriter {
-  private final JournalWriter mJournalWriter;
+  private final Journal mJournal;
   private final ConcurrentLinkedQueue<JournalEntry> mQueue;
   /** Represents the count of entries added to the journal queue. */
   private final AtomicLong mCounter;
@@ -52,17 +53,17 @@ public final class AsyncJournalWriter {
   /**
    * Creates a {@link AsyncJournalWriter}.
    *
-   * @param journalWriter the {@link JournalWriter} to use for writing
+   * @param journal the {@link Journal} to use for writing
    */
-  public AsyncJournalWriter(JournalWriter journalWriter) {
-    mJournalWriter = Preconditions.checkNotNull(journalWriter, "journalWriter");
+  public AsyncJournalWriter(Journal journal) {
+    mJournal = Preconditions.checkNotNull(journal, "journal");
     mQueue = new ConcurrentLinkedQueue<>();
     mCounter = new AtomicLong(0);
     mFlushCounter = new AtomicLong(0);
     mWriteCounter = new AtomicLong(0);
     // convert milliseconds to nanoseconds.
     mFlushBatchTimeNs =
-        1000000L * Configuration.getLong(PropertyKey.MASTER_JOURNAL_FLUSH_BATCH_TIME_MS);
+        1000000L * Configuration.getMs(PropertyKey.MASTER_JOURNAL_FLUSH_BATCH_TIME_MS);
   }
 
   /**
@@ -101,15 +102,13 @@ public final class AsyncJournalWriter {
    * counter is already flushed, this is essentially a no-op.
    *
    * @param targetCounter the counter to flush
-   * @throws IOException if an error occurs in flushing the journal
    */
   public void flush(final long targetCounter) throws IOException {
     if (targetCounter <= mFlushCounter.get()) {
       return;
     }
     // Using reentrant lock, since it seems to result in higher throughput than using 'synchronized'
-    mFlushLock.lock();
-    try {
+    try (LockResource lr = new LockResource(mFlushLock)) {
       long startTime = System.nanoTime();
       long flushCounter = mFlushCounter.get();
       if (targetCounter <= flushCounter) {
@@ -125,7 +124,7 @@ public final class AsyncJournalWriter {
             // No more entries in the queue. Break out of the infinite for-loop.
             break;
           }
-          mJournalWriter.write(entry);
+          mJournal.write(entry);
           // Remove the head entry, after the entry was successfully written.
           mQueue.poll();
           writeCounter = mWriteCounter.incrementAndGet();
@@ -139,10 +138,8 @@ public final class AsyncJournalWriter {
           }
         }
       }
-      mJournalWriter.flush();
+      mJournal.flush();
       mFlushCounter.set(writeCounter);
-    } finally {
-      mFlushLock.unlock();
     }
   }
 }

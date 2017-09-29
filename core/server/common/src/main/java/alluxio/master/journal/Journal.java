@@ -11,71 +11,31 @@
 
 package alluxio.master.journal;
 
-import alluxio.master.journal.ufs.UfsJournal;
-import alluxio.util.URIUtils;
+import alluxio.proto.journal.Journal.JournalEntry;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.net.URI;
-import java.net.URISyntaxException;
-
-import javax.annotation.concurrent.ThreadSafe;
 
 /**
- * The read-only journal. It prevents access to a {@link JournalWriter}.
+ * A journal for persisting journal entries.
  */
-@ThreadSafe
-public interface Journal {
-
-  /**
-   * A {@link Journal} factory.
-   */
-  @ThreadSafe
-  final class Factory implements JournalFactory {
-    private final URI mBase;
-
-    /**
-     * Creates a read-only journal factory with the specified base location. When journals are
-     * created, their names are appended to the base location.
-     *
-     * @param base the base location for journals created by this factory
-     */
-    public Factory(URI base) {
-      mBase = base;
-    }
-
-    @Override
-    public Journal create(String name) {
-      try {
-        return new UfsJournal(URIUtils.appendPath(mBase, name));
-      } catch (URISyntaxException e) {
-        throw new RuntimeException(e);
-      }
-    }
-
-    /**
-     * Creates a new read-only journal using the given location.
-     *
-     * @param location the journal location
-     * @return a new instance of {@link Journal}
-     */
-    public static Journal create(URI location) {
-      return new UfsJournal(location);
-    }
-  }
-
+public interface Journal extends Closeable {
   /**
    * @return the journal location
    */
   URI getLocation();
 
   /**
-   * @return the {@link JournalReader} for this journal
+   * Writes an entry. {@link #flush} should be called afterwards if we want to make sure the entry
+   * is persisted.
+   *
+   * @param entry the journal entry to write
    */
-  JournalReader getReader();
+  void write(JournalEntry entry) throws IOException;
 
   /**
-   * @return whether the journal has been formatted
-   * @throws IOException if an I/O error occurs
+   * Flushes all the entries written to the underlying storage.
    */
-  boolean isFormatted() throws IOException;
+  void flush() throws IOException;
 }

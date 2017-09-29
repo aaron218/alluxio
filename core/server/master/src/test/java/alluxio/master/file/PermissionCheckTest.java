@@ -11,9 +11,12 @@
 
 package alluxio.master.file;
 
+import alluxio.AlluxioTestDirectory;
 import alluxio.AlluxioURI;
 import alluxio.AuthenticatedUserRule;
+import alluxio.Configuration;
 import alluxio.ConfigurationRule;
+import alluxio.ConfigurationTestUtils;
 import alluxio.Constants;
 import alluxio.LoginUserRule;
 import alluxio.PropertyKey;
@@ -22,6 +25,7 @@ import alluxio.exception.ExceptionMessage;
 import alluxio.exception.FileDoesNotExistException;
 import alluxio.master.MasterRegistry;
 import alluxio.master.block.BlockMaster;
+import alluxio.master.block.BlockMasterFactory;
 import alluxio.master.file.meta.Inode;
 import alluxio.master.file.meta.InodeDirectory;
 import alluxio.master.file.meta.InodeFile;
@@ -33,11 +37,12 @@ import alluxio.master.file.options.CreateDirectoryOptions;
 import alluxio.master.file.options.CreateFileOptions;
 import alluxio.master.file.options.DeleteOptions;
 import alluxio.master.file.options.FreeOptions;
+import alluxio.master.file.options.GetStatusOptions;
 import alluxio.master.file.options.ListStatusOptions;
 import alluxio.master.file.options.RenameOptions;
 import alluxio.master.file.options.SetAttributeOptions;
-import alluxio.master.journal.JournalFactory;
-import alluxio.master.journal.MutableJournal;
+import alluxio.master.journal.JournalSystem;
+import alluxio.master.journal.noop.NoopJournalSystem;
 import alluxio.security.GroupMappingServiceTestUtils;
 import alluxio.security.authorization.Mode;
 import alluxio.security.group.GroupMappingService;
@@ -62,7 +67,6 @@ import org.mockito.Mockito;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -102,15 +106,20 @@ public final class PermissionCheckTest {
   private static final Mode TEST_DIR_MODE = new Mode((short) 0755);
   private static final Mode TEST_FILE_MODE = new Mode((short) 0755);
 
+  private MasterRegistry mRegistry;
   private FileSystemMaster mFileSystemMaster;
   private BlockMaster mBlockMaster;
 
   private InodeTree mInodeTree;
 
   @Rule
-  public ConfigurationRule mConfiguration = new ConfigurationRule(ImmutableMap
-      .of(PropertyKey.SECURITY_GROUP_MAPPING_CLASS, FakeUserGroupsMapping.class.getName(),
-          PropertyKey.SECURITY_AUTHORIZATION_PERMISSION_SUPERGROUP, TEST_SUPER_GROUP));
+  public ConfigurationRule mConfiguration =
+      new ConfigurationRule(new ImmutableMap.Builder<PropertyKey, String>()
+          .put(PropertyKey.SECURITY_GROUP_MAPPING_CLASS, FakeUserGroupsMapping.class.getName())
+          .put(PropertyKey.SECURITY_AUTHORIZATION_PERMISSION_SUPERGROUP, TEST_SUPER_GROUP)
+          .put(PropertyKey.MASTER_MOUNT_TABLE_ROOT_UFS, AlluxioTestDirectory
+              .createTemporaryDirectory("PermissionCheckTest").getAbsolutePath())
+          .build());
 
   @Rule
   public AuthenticatedUserRule mAuthenticatedUser =
@@ -171,14 +180,13 @@ public final class PermissionCheckTest {
 
   @Before
   public void before() throws Exception {
+    Configuration.set(PropertyKey.MASTER_MOUNT_TABLE_ROOT_UFS, mTestFolder.newFolder());
     GroupMappingServiceTestUtils.resetCache();
-    MasterRegistry registry = new MasterRegistry();
-    JournalFactory factory =
-        new MutableJournal.Factory(new URI(mTestFolder.newFolder().getAbsolutePath()));
-    mBlockMaster = new BlockMaster(registry, factory);
-    mFileSystemMaster = new FileSystemMaster(registry, factory);
-    mBlockMaster.start(true);
-    mFileSystemMaster.start(true);
+    mRegistry = new MasterRegistry();
+    JournalSystem journalSystem = new NoopJournalSystem();
+    mBlockMaster = new BlockMasterFactory().create(mRegistry, journalSystem);
+    mFileSystemMaster = new FileSystemMasterFactory().create(mRegistry, journalSystem);
+    mRegistry.start(true);
 
     createDirAndFileForTest();
 
@@ -188,9 +196,9 @@ public final class PermissionCheckTest {
 
   @After
   public void after() throws Exception {
-    mFileSystemMaster.stop();
-    mBlockMaster.stop();
+    mRegistry.stop();
     GroupMappingServiceTestUtils.resetCache();
+    ConfigurationTestUtils.resetConfiguration();
   }
 
   /**
@@ -615,6 +623,13 @@ public final class PermissionCheckTest {
     }
   }
 
+  /**
+   * This method verifies the read permission.
+   * @param user the user
+   * @param path the path of the file to read
+   * @param isFile whether the path is a file
+   * @throws Exception if it fails to verify
+   */
   private void verifyRead(TestUser user, String path, boolean isFile) throws Exception {
     try (Closeable r = new AuthenticatedUserRule(user.getUser()).toResource()) {
       verifyGetFileId(user, path);
@@ -622,6 +637,12 @@ public final class PermissionCheckTest {
     }
   }
 
+  /**
+   * This method verifies the get fileId.
+   * @param user the user
+   * @param path the path of the file to verify
+   * @throws Exception if it fails to verify
+   */
   private void verifyGetFileId(TestUser user, String path) throws Exception {
     try (Closeable r = new AuthenticatedUserRule(user.getUser()).toResource()) {
       long fileId = mFileSystemMaster.getFileId(new AlluxioURI(path));
@@ -633,7 +654,9 @@ public final class PermissionCheckTest {
       throws Exception {
     try (Closeable r = new AuthenticatedUserRule(user.getUser()).toResource()) {
       if (isFile) {
-        Assert.assertEquals(path, mFileSystemMaster.getFileInfo(new AlluxioURI(path)).getPath());
+        Assert.assertEquals(path,
+            mFileSystemMaster.getFileInfo(new AlluxioURI(path), GetStatusOptions.defaults())
+                .getPath());
         Assert.assertEquals(1,
             mFileSystemMaster.listStatus(new AlluxioURI(path), ListStatusOptions.defaults())
                 .size());
@@ -692,7 +715,8 @@ public final class PermissionCheckTest {
     try (Closeable r = new AuthenticatedUserRule(user.getUser()).toResource()) {
       mFileSystemMaster.setAttribute(new AlluxioURI(path), options);
 
-      FileInfo fileInfo = mFileSystemMaster.getFileInfo(new AlluxioURI(path));
+      FileInfo fileInfo =
+          mFileSystemMaster.getFileInfo(new AlluxioURI(path), GetStatusOptions.defaults());
       return SetAttributeOptions.defaults().setPinned(fileInfo.isPinned()).setTtl(fileInfo.getTtl())
           .setPersisted(fileInfo.isPersisted());
     }
@@ -926,7 +950,7 @@ public final class PermissionCheckTest {
     List<Inode<?>> inodes = new ArrayList<>();
     inodes.add(getRootInode());
     if (permissions.size() == 0) {
-      return new MutableLockedInodePath(new AlluxioURI("/"), inodes, null);
+      return new MutableLockedInodePath(new AlluxioURI("/"), inodes, null, InodeTree.LockMode.READ);
     }
     String uri = "";
     for (int i = 0; i < permissions.size(); i++) {
@@ -946,6 +970,6 @@ public final class PermissionCheckTest {
         inodes.add(inode);
       }
     }
-    return new MutableLockedInodePath(new AlluxioURI(uri), inodes, null);
+    return new MutableLockedInodePath(new AlluxioURI(uri), inodes, null, InodeTree.LockMode.READ);
   }
 }
