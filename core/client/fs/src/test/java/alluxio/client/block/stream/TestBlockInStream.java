@@ -11,6 +11,8 @@
 
 package alluxio.client.block.stream;
 
+import alluxio.wire.WorkerNetAddress;
+
 import java.io.IOException;
 
 /**
@@ -22,15 +24,18 @@ public class TestBlockInStream extends BlockInStream {
   private int mBytesRead;
   private boolean mClosed;
 
-  public TestBlockInStream(byte[] mData, long id, long length, boolean shortCircuit,
+  public TestBlockInStream(byte[] data, long id, long length, boolean shortCircuit,
       BlockInStreamSource source) {
-    super(new Factory(mData, shortCircuit), source, id, length);
+    super(new Factory(data, shortCircuit), new WorkerNetAddress(), source, id, length);
     mBytesRead = 0;
   }
 
   @Override
   public int read(byte[] b, int off, int len) throws IOException {
     int bytesRead = super.read(b, off, len);
+    if (bytesRead <= 0) {
+      return bytesRead;
+    }
     mBytesRead += bytesRead;
     return bytesRead;
   }
@@ -38,6 +43,9 @@ public class TestBlockInStream extends BlockInStream {
   @Override
   public int positionedRead(long pos, byte[] b, int off, int len) throws IOException {
     int bytesRead = super.positionedRead(pos, b, off, len);
+    if (bytesRead <= 0) {
+      return bytesRead;
+    }
     mBytesRead += bytesRead;
     return bytesRead;
   }

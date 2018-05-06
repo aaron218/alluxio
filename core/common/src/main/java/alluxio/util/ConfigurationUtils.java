@@ -24,6 +24,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
 
+import javax.annotation.Nullable;
+
 /**
  * Utilities for working with Alluxio configurations.
  */
@@ -65,6 +67,7 @@ public final class ConfigurationUtils {
    * @param filePath the absolute path of the file to load properties
    * @return a set of properties on success, or null if failed
    */
+  @Nullable
   public static Properties loadPropertiesFromFile(String filePath) {
     Properties properties = new Properties();
 
@@ -84,9 +87,10 @@ public final class ConfigurationUtils {
    *
    * @param propertiesFile the file to load properties
    * @param confPathList a list of paths to search the propertiesFile
-   * @return loaded properties on success, or null if failed
+   * @return the site properties file on success search, or null if failed
    */
-  public static Properties searchPropertiesFile(String propertiesFile,
+  @Nullable
+  public static String searchPropertiesFile(String propertiesFile,
       String[] confPathList) {
     if (propertiesFile == null || confPathList == null) {
       return null;
@@ -96,11 +100,10 @@ public final class ConfigurationUtils {
       Properties properties = loadPropertiesFromFile(file);
       if (properties != null) {
         // If a site conf is successfully loaded, stop trying different paths.
-        LOG.info("Configuration file {} loaded.", file);
-        return properties;
+        return file;
       }
     }
-    return loadPropertiesFromResource(propertiesFile);
+    return null;
   }
 
   /**

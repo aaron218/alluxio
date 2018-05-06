@@ -11,6 +11,7 @@
 
 package alluxio.master.file.meta;
 
+import alluxio.Constants;
 import alluxio.collections.FieldIndex;
 import alluxio.collections.IndexDefinition;
 import alluxio.collections.UniqueFieldIndex;
@@ -26,6 +27,7 @@ import com.google.common.collect.ImmutableSet;
 import java.util.HashSet;
 import java.util.Set;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 /**
@@ -88,6 +90,7 @@ public final class InodeDirectory extends Inode<InodeDirectory> {
    * @return the read-locked inode with the given name, or null if there is no such child
    * @throws InvalidPathException if the path to the child is invalid
    */
+  @Nullable
   public Inode<?> getChildReadLock(String name, InodeLockList lockList) throws
       InvalidPathException {
     while (true) {
@@ -111,6 +114,7 @@ public final class InodeDirectory extends Inode<InodeDirectory> {
    * @return the write-locked inode with the given name, or null if there is no such child
    * @throws InvalidPathException if the path to the child is invalid
    */
+  @Nullable
   public Inode<?> getChildWriteLock(String name, InodeLockList lockList) throws
       InvalidPathException {
     while (true) {
@@ -234,6 +238,7 @@ public final class InodeDirectory extends Inode<InodeDirectory> {
     ret.setMode(getMode());
     ret.setPersistenceState(getPersistenceState().toString());
     ret.setMountPoint(isMountPoint());
+    ret.setUfsFingerprint(Constants.INVALID_UFS_FINGERPRINT);
     return ret;
   }
 
@@ -249,6 +254,8 @@ public final class InodeDirectory extends Inode<InodeDirectory> {
    * @return the {@link InodeDirectory} representation
    */
   public static InodeDirectory fromJournalEntry(InodeDirectoryEntry entry) {
+    // If journal entry has no mode set, set default mode for backwards-compatibility.
+    short mode = entry.hasMode() ? (short) entry.getMode() : Constants.DEFAULT_FILE_SYSTEM_MODE;
     return new InodeDirectory(entry.getId())
         .setCreationTimeMs(entry.getCreationTimeMs())
         .setName(entry.getName())
@@ -258,7 +265,7 @@ public final class InodeDirectory extends Inode<InodeDirectory> {
         .setLastModificationTimeMs(entry.getLastModificationTimeMs(), true)
         .setOwner(entry.getOwner())
         .setGroup(entry.getGroup())
-        .setMode((short) entry.getMode())
+        .setMode(mode)
         .setMountPoint(entry.getMountPoint())
         .setTtl(entry.getTtl())
         .setTtlAction(ProtobufUtils.fromProtobuf(entry.getTtlAction()))

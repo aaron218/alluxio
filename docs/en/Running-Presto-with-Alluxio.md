@@ -15,14 +15,7 @@ The prerequisite for this part is that you have [Java](Java-Setup.html). And the
 Alluxio cluster should also be set up in accordance to these guides for either
 [Local Mode](Running-Alluxio-Locally.html) or [Cluster Mode](Running-Alluxio-on-a-Cluster.html).
 
-Alluxio client will need to be compiled with the Presto specific profile. Build the entire project
-from the top level `alluxio` directory with the following command:
-
-```bash
-mvn clean package -Ppresto -DskipTests
-```
-
-Please [Download Presto](https://repo1.maven.org/maven2/com/facebook/presto/presto-server/)(This doc uses presto-0.170). Also, please complete Hive setup using
+Please [Download Presto](https://repo1.maven.org/maven2/com/facebook/presto/presto-server/)(This doc uses presto-0.191). Also, please complete Hive setup using
 [Hive On Alluxio](Running-Hive-with-Alluxio.html)
 
 # Configuration
@@ -85,15 +78,20 @@ Similar to above, add additional Alluxio properties to `core-site.xml` of Hadoop
 </property>
 ```
 
-Alternatively, you can also append the path to [`alluxio-site.properties`](Configuration-Settings.html) to Presto's JVM config at `etc/jvm.config` under Presto folder. The advantage of this approach is to have all the Alluxio properties set within the same file of `alluxio-site.properties`.
+Alternatively, you can also append the conf path (i.e. `/<PATH_TO_ALLUXIO>/conf`) containing [`alluxio-site.properties`](Configuration-Settings.html) to Presto's JVM config at `etc/jvm.config` under Presto folder. The advantage of this approach is to have all the Alluxio properties set within the same file of `alluxio-site.properties`.
 
 ```bash
 ...
--Xbootclasspath/p:<path-to-alluxio-site-properties>
+-Xbootclasspath/p:<path-to-alluxio-conf>
 ```
 
-Also, it's recommended to increase `alluxio.user.network.netty.timeout.ms` to a bigger value (e.g. 10 mins) to avoid the timeout
+Also, it's recommended to increase `alluxio.user.network.netty.timeout` to a bigger value (e.g. `10min`) to avoid the timeout
  failure when reading large files from remote worker.
+
+#### Enable `hive.force-local-scheduling`
+
+It is recommended to collocate Presto with Alluxio so that Presto workers can read data locally. An important option to enable in Presto is `hive.force-local-scheduling`, which forces splits to be 
+scheduled on the same node as the Alluxio worker serving the split data. By default, `hive.force-local-scheduling` in Presto is set to false, and Presto will not attempt to schedule the work on the same machine as the Alluxio worker node.
 
 #### Increase `hive.max-split-size`
 
@@ -101,12 +99,16 @@ Presto's Hive integration uses the config [`hive.max-split-size`](https://terada
 
 # Distribute the Alluxio Client Jar
 
+We recommend you to download the tarball from
+Alluxio [download page](http://www.alluxio.org/download).
+Alternatively, advanced users can choose to compile this client jar from the source code
+by following Follow the instructs [here](Building-Alluxio-Master-Branch.html#compute-framework-support).
+The Alluxio client jar can be found at `{{site.ALLUXIO_CLIENT_JAR_PATH}}`.
+
 Distribute the Alluxio client jar to all worker nodes in Presto:
-- You must put Alluxio client jar `{{site.ALLUXIO_CLIENT_JAR_PATH}}` into Presto cluster's worker directory
+- You must put Alluxio client jar `{{site.ALLUXIO_CLIENT_JAR_PATH_PRESTO}}` into Presto cluster's worker directory
 `$PRESTO_HOME/plugin/hive-hadoop2/`
 (For different versions of Hadoop, put the appropriate folder), And restart the process of coordinator and worker.
-
-Alternatively, advanced users can choose to compile this client jar from the source code. Follow the instructs [here](Building-Alluxio-Master-Branch.html#compute-framework-support) and use the generated jar at `{{site.ALLUXIO_CLIENT_JAR_PATH_BUILD}}` for the rest of this guide.
 
 # Presto cli examples
 
@@ -137,7 +139,7 @@ Alternatively, you can follow the [instructions](Running-Hive-with-Alluxio.html#
 
 Next, using a single query:
 ```
-/home/path/presto/presto-cli-0.170-executable.jar --server masterIp:prestoPort --execute "use default;select * from u_user limit 10;" --user username --debug
+/home/path/presto/presto-cli-0.191-executable.jar --server masterIp:prestoPort --execute "use default;select * from u_user limit 10;" --user username --debug
 ```
 
 And you can see the query results from console:

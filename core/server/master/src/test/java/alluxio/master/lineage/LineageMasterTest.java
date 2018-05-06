@@ -11,6 +11,13 @@
 
 package alluxio.master.lineage;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.eq;
+
 import alluxio.AlluxioURI;
 import alluxio.exception.ExceptionMessage;
 import alluxio.exception.FileDoesNotExistException;
@@ -19,7 +26,10 @@ import alluxio.exception.LineageDoesNotExistException;
 import alluxio.job.CommandLineJob;
 import alluxio.job.Job;
 import alluxio.job.JobConf;
+import alluxio.master.DefaultSafeModeManager;
+import alluxio.master.MasterContext;
 import alluxio.master.MasterRegistry;
+import alluxio.master.SafeModeManager;
 import alluxio.master.file.FileSystemMaster;
 import alluxio.master.file.options.CompleteFileOptions;
 import alluxio.master.journal.JournalSystem;
@@ -38,7 +48,6 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,6 +64,7 @@ public final class LineageMasterTest {
   private FileSystemMaster mFileSystemMaster;
   private Job mJob;
   private MasterRegistry mRegistry;
+  private SafeModeManager mSafeModeManager;
 
   /** Rule to create a new temporary folder during each test. */
   @Rule
@@ -67,11 +77,13 @@ public final class LineageMasterTest {
   public void before() throws Exception {
     mRegistry = new MasterRegistry();
     JournalSystem journalSystem = new NoopJournalSystem();
-    mFileSystemMaster = Mockito.mock(FileSystemMaster.class);
+    mFileSystemMaster = mock(FileSystemMaster.class);
     mRegistry.add(FileSystemMaster.class, mFileSystemMaster);
+    mSafeModeManager = new DefaultSafeModeManager();
     ThreadFactory threadPool = ThreadFactoryUtils.build("LineageMasterTest-%d", true);
     mExecutorService = Executors.newFixedThreadPool(2, threadPool);
-    mLineageMaster = new DefaultLineageMaster(mFileSystemMaster, journalSystem,
+    mLineageMaster = new DefaultLineageMaster(mFileSystemMaster,
+        new MasterContext(journalSystem, mSafeModeManager),
         ExecutorServiceFactories.constantExecutorServiceFactory(mExecutorService));
     mRegistry.add(LineageMaster.class, mLineageMaster);
     mJob = new CommandLineJob("test", new JobConf("output"));
@@ -87,7 +99,7 @@ public final class LineageMasterTest {
    */
   @Test
   public void listLineages() throws Exception {
-    Mockito.when(mFileSystemMaster.getPath(Mockito.anyLong())).thenReturn(new AlluxioURI("test"));
+    when(mFileSystemMaster.getPath(anyLong())).thenReturn(new AlluxioURI("test"));
     mRegistry.start(true);
     mLineageMaster.createLineage(new ArrayList<AlluxioURI>(),
         Lists.newArrayList(new AlluxioURI("/test1")), mJob);
@@ -104,7 +116,7 @@ public final class LineageMasterTest {
   @Test
   public void createLineageWithNonExistingFile() throws Exception {
     AlluxioURI missingInput = new AlluxioURI("/test1");
-    Mockito.when(mFileSystemMaster.getFileId(missingInput)).thenReturn(IdUtils.INVALID_FILE_ID);
+    when(mFileSystemMaster.getFileId(missingInput)).thenReturn(IdUtils.INVALID_FILE_ID);
     mRegistry.start(true);
     // try catch block used because ExpectedExceptionRule conflicts with Powermock
     try {
@@ -176,12 +188,12 @@ public final class LineageMasterTest {
   public void reinitializeFile() throws Exception {
     FileInfo fileInfo = new FileInfo();
     fileInfo.setCompleted(false);
-    Mockito.when(mFileSystemMaster.getFileInfo(Mockito.any(Long.class))).thenReturn(fileInfo);
+    when(mFileSystemMaster.getFileInfo(any(Long.class))).thenReturn(fileInfo);
     mRegistry.start(true);
     mLineageMaster.createLineage(new ArrayList<AlluxioURI>(),
         Lists.newArrayList(new AlluxioURI("/test1")), mJob);
     mLineageMaster.reinitializeFile("/test1", 500L, 10L, TtlAction.DELETE);
-    Mockito.verify(mFileSystemMaster).reinitializeFile(new AlluxioURI("/test1"), 500L, 10L,
+    verify(mFileSystemMaster).reinitializeFile(new AlluxioURI("/test1"), 500L, 10L,
         TtlAction.DELETE);
   }
 
@@ -194,8 +206,8 @@ public final class LineageMasterTest {
     AlluxioURI file = new AlluxioURI("/test1");
     mLineageMaster.createLineage(new ArrayList<AlluxioURI>(), Lists.newArrayList(file), mJob);
     mFileSystemMaster.completeFile(file, CompleteFileOptions.defaults());
-    Mockito.verify(mFileSystemMaster).completeFile(Mockito.eq(file),
-        Mockito.any(CompleteFileOptions.class));
+    verify(mFileSystemMaster).completeFile(eq(file),
+        any(CompleteFileOptions.class));
   }
 
   @Test

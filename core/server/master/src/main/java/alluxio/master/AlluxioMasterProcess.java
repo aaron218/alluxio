@@ -19,14 +19,17 @@ import alluxio.master.journal.JournalSystem;
 import alluxio.master.journal.JournalSystem.Mode;
 import alluxio.metrics.MetricsSystem;
 import alluxio.metrics.sink.MetricsServlet;
+import alluxio.metrics.sink.PrometheusMetricsServlet;
 import alluxio.security.authentication.TransportProvider;
 import alluxio.thrift.MetaMasterClientService;
 import alluxio.util.CommonUtils;
+import alluxio.util.JvmPauseMonitor;
 import alluxio.util.WaitForOptions;
 import alluxio.util.network.NetworkAddressUtils;
 import alluxio.util.network.NetworkAddressUtils.ServiceType;
 import alluxio.web.MasterWebServer;
 import alluxio.web.WebServer;
+import alluxio.wire.ConfigProperty;
 
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
@@ -45,6 +48,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import javax.annotation.Nullable;
@@ -79,6 +84,8 @@ public class AlluxioMasterProcess implements MasterProcess {
   private final InetSocketAddress mRpcConnectAddress;
 
   private final MetricsServlet mMetricsServlet = new MetricsServlet(MetricsSystem.METRIC_REGISTRY);
+  private final PrometheusMetricsServlet mPMetricsServlet = new PrometheusMetricsServlet(
+      MetricsSystem.METRIC_REGISTRY);
 
   /** The master registry. */
   private final MasterRegistry mRegistry;
@@ -89,14 +96,17 @@ public class AlluxioMasterProcess implements MasterProcess {
   /** The RPC server. */
   private TServer mThriftServer;
 
-  /** is true if the master is serving the RPC server. */
-  private boolean mIsServing;
-
   /** The start time for when the master started serving the RPC server. */
   private long mStartTimeMs = -1;
 
   /** The journal system for writing journal entries and restoring master state. */
   protected final JournalSystem mJournalSystem;
+
+  /** The JVMMonitor Progress. */
+  private JvmPauseMonitor mJvmPauseMonitor;
+
+  /** The manager of safe mode state. */
+  protected final SafeModeManager mSafeModeManager;
 
   /**
    * Creates a new {@link AlluxioMasterProcess}.
@@ -143,7 +153,8 @@ public class AlluxioMasterProcess implements MasterProcess {
       }
       // Create masters.
       mRegistry = new MasterRegistry();
-      MasterUtils.createMasters(mJournalSystem, mRegistry);
+      mSafeModeManager = new DefaultSafeModeManager();
+      MasterUtils.createMasters(mJournalSystem, mRegistry, mSafeModeManager);
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -179,8 +190,37 @@ public class AlluxioMasterProcess implements MasterProcess {
   }
 
   @Override
+  public boolean isInSafeMode() {
+    return mSafeModeManager.isInSafeMode();
+  }
+
+  @Override
   public boolean isServing() {
-    return mIsServing;
+    return mThriftServer != null && mThriftServer.isServing();
+  }
+
+  @Override
+  public List<ConfigProperty> getConfiguration() {
+    List<ConfigProperty> configInfoList = new ArrayList<>();
+    String alluxioConfPrefix = "alluxio";
+    for (Map.Entry<String, String> entry : Configuration.toMap().entrySet()) {
+      String key = entry.getKey();
+      String value = entry.getValue();
+      if (key.startsWith(alluxioConfPrefix) && value != null) {
+        PropertyKey propertyKey = PropertyKey.fromString(key);
+        Configuration.Source source = Configuration.getSource(propertyKey);
+        String sourceStr;
+        if (source == Configuration.Source.SITE_PROPERTY) {
+          sourceStr =
+              String.format("%s (%s)", source.name(), Configuration.getSitePropertiesFile());
+        } else {
+          sourceStr = source.name();
+        }
+        configInfoList.add(new ConfigProperty()
+            .setName(key).setValue(entry.getValue()).setSource(sourceStr));
+      }
+    }
+    return configInfoList;
   }
 
   @Override
@@ -204,11 +244,10 @@ public class AlluxioMasterProcess implements MasterProcess {
 
   @Override
   public void stop() throws Exception {
-    if (mIsServing) {
+    if (isServing()) {
       stopServing();
       stopMasters();
       mJournalSystem.stop();
-      mIsServing = false;
     }
   }
 
@@ -220,6 +259,9 @@ public class AlluxioMasterProcess implements MasterProcess {
    */
   protected void startMasters(boolean isLeader) {
     try {
+      if (isLeader) {
+        mSafeModeManager.notifyPrimaryMasterStarted();
+      }
       mRegistry.start(isLeader);
       LOG.info("All masters started");
     } catch (IOException e) {
@@ -253,11 +295,17 @@ public class AlluxioMasterProcess implements MasterProcess {
   protected void startServing(String startMessage, String stopMessage) {
     MetricsSystem.startSinks();
     startServingWebServer();
-    LOG.info("{} version {} binding to {} @ {} {}", this, RuntimeConstants.VERSION, mRpcBindAddress,
-        mRpcConnectAddress, startMessage);
+    startJvmMonitorProcess();
+    LOG.info("Alluxio master version {} started{}. "
+            + "bindHost={}, connectHost={}, rpcPort={}, webPort={}",
+        RuntimeConstants.VERSION,
+        startMessage,
+        NetworkAddressUtils.getBindAddress(ServiceType.MASTER_RPC),
+        NetworkAddressUtils.getConnectAddress(ServiceType.MASTER_RPC),
+        NetworkAddressUtils.getPort(ServiceType.MASTER_RPC),
+        NetworkAddressUtils.getPort(ServiceType.MASTER_WEB));
     startServingRPCServer();
-    LOG.info("{} version {} ended @ {} {}", this, RuntimeConstants.VERSION, mRpcConnectAddress,
-        stopMessage);
+    LOG.info("Alluxio master ended{}", stopMessage);
   }
 
   /**
@@ -271,8 +319,20 @@ public class AlluxioMasterProcess implements MasterProcess {
     Configuration.set(PropertyKey.MASTER_WEB_PORT, Integer.toString(mWebServer.getLocalPort()));
     // Add the metrics servlet to the web server.
     mWebServer.addHandler(mMetricsServlet.getHandler());
+    // Add the prometheus metrics servlet to the web server.
+    mWebServer.addHandler(mPMetricsServlet.getHandler());
     // start web ui
     mWebServer.start();
+  }
+
+  /**
+   * Starts jvm monitor process, to monitor jvm.
+   */
+  protected void startJvmMonitorProcess() {
+    if (Configuration.getBoolean(PropertyKey.MASTER_JVM_MONITOR_ENABLED)) {
+      mJvmPauseMonitor = new JvmPauseMonitor();
+      mJvmPauseMonitor.start();
+    }
   }
 
   private void registerServices(TMultiplexedProcessor processor, Map<String, TProcessor> services) {
@@ -319,16 +379,13 @@ public class AlluxioMasterProcess implements MasterProcess {
     Args args = new TThreadPoolServer.Args(mTServerSocket).maxWorkerThreads(mMaxWorkerThreads)
         .minWorkerThreads(mMinWorkerThreads).processor(processor).transportFactory(transportFactory)
         .protocolFactory(new TBinaryProtocol.Factory(true, true));
-    if (Configuration.getBoolean(PropertyKey.TEST_MODE)) {
-      args.stopTimeoutVal = 0;
-    } else {
-      args.stopTimeoutVal = Constants.THRIFT_STOP_TIMEOUT_SECONDS;
-    }
+
+    args.stopTimeoutVal = (int) Configuration.getMs(PropertyKey.MASTER_THRIFT_SHUTDOWN_TIMEOUT);
     mThriftServer = new TThreadPoolServer(args);
 
     // start thrift rpc server
-    mIsServing = true;
     mStartTimeMs = System.currentTimeMillis();
+    mSafeModeManager.notifyRpcServerStarted();
     mThriftServer.serve();
   }
 
@@ -345,12 +402,14 @@ public class AlluxioMasterProcess implements MasterProcess {
       mTServerSocket.close();
       mTServerSocket = null;
     }
+    if (mJvmPauseMonitor != null) {
+      mJvmPauseMonitor.stop();
+    }
     if (mWebServer != null) {
       mWebServer.stop();
       mWebServer = null;
     }
     MetricsSystem.stopSinks();
-    mIsServing = false;
   }
 
   @Override

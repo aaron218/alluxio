@@ -21,12 +21,14 @@ import alluxio.exception.ExceptionMessage;
 import alluxio.exception.FileAlreadyExistsException;
 import alluxio.exception.FileDoesNotExistException;
 import alluxio.exception.InvalidPathException;
+import alluxio.exception.status.UnavailableException;
 import alluxio.master.AbstractMaster;
+import alluxio.master.MasterContext;
 import alluxio.master.file.FileSystemMaster;
 import alluxio.master.file.options.CreateDirectoryOptions;
 import alluxio.master.file.options.DeleteOptions;
 import alluxio.master.file.options.RenameOptions;
-import alluxio.master.journal.JournalSystem;
+import alluxio.master.journal.JournalContext;
 import alluxio.proto.journal.Journal.JournalEntry;
 import alluxio.proto.journal.KeyValue;
 import alluxio.thrift.KeyValueMasterClientService;
@@ -74,10 +76,10 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
 
   /**
    * @param fileSystemMaster the file system master handle
-   * @param journalSystem the journal system to use for tracking master operations
+   * @param masterContext the context for Alluxio master
    */
-  DefaultKeyValueMaster(FileSystemMaster fileSystemMaster, JournalSystem journalSystem) {
-    super(journalSystem, new SystemClock(), ExecutorServiceFactories
+  DefaultKeyValueMaster(FileSystemMaster fileSystemMaster, MasterContext masterContext) {
+    super(masterContext, new SystemClock(), ExecutorServiceFactories
         .fixedThreadPoolExecutorServiceFactory(Constants.KEY_VALUE_MASTER_NAME, 2));
     mFileSystemMaster = fileSystemMaster;
     mCompleteStoreToPartitions = new HashMap<>();
@@ -144,17 +146,18 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
 
   @Override
   public synchronized void completePartition(AlluxioURI path, PartitionInfo info)
-      throws AccessControlException, FileDoesNotExistException, InvalidPathException {
+      throws AccessControlException, FileDoesNotExistException, InvalidPathException,
+      UnavailableException {
     final long fileId = mFileSystemMaster.getFileId(path);
     if (fileId == IdUtils.INVALID_FILE_ID) {
       throw new FileDoesNotExistException(
           String.format("Failed to completePartition: path %s does not exist", path));
     }
 
-    completePartitionInternal(fileId, info);
-
-    writeJournalEntry(newCompletePartitionEntry(fileId, info));
-    flushJournal();
+    try (JournalContext journalContext = createJournalContext()) {
+      completePartitionInternal(fileId, info);
+      journalContext.append(newCompletePartitionEntry(fileId, info));
+    }
   }
 
   // Marks a partition complete, called when replaying journals
@@ -178,16 +181,17 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
   }
 
   @Override
-  public synchronized void completeStore(AlluxioURI path)
-      throws FileDoesNotExistException, InvalidPathException, AccessControlException {
+  public synchronized void completeStore(AlluxioURI path) throws FileDoesNotExistException,
+      InvalidPathException, AccessControlException, UnavailableException {
     final long fileId = mFileSystemMaster.getFileId(path);
     if (fileId == IdUtils.INVALID_FILE_ID) {
       throw new FileDoesNotExistException(
           String.format("Failed to completeStore: path %s does not exist", path));
     }
-    completeStoreInternal(fileId);
-    writeJournalEntry(newCompleteStoreEntry(fileId));
-    flushJournal();
+    try (JournalContext journalContext = createJournalContext()) {
+      completeStoreInternal(fileId);
+      journalContext.append(newCompleteStoreEntry(fileId));
+    }
   }
 
   // Marks a store complete, called when replaying journals
@@ -208,8 +212,8 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
   }
 
   @Override
-  public synchronized void createStore(AlluxioURI path)
-      throws FileAlreadyExistsException, InvalidPathException, AccessControlException {
+  public synchronized void createStore(AlluxioURI path) throws FileAlreadyExistsException,
+      InvalidPathException, AccessControlException, UnavailableException {
     try {
       // Create this dir
       mFileSystemMaster.createDirectory(path, CreateDirectoryOptions.defaults().setRecursive(true));
@@ -224,9 +228,10 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
     long fileId = mFileSystemMaster.getFileId(path);
     Preconditions.checkState(fileId != IdUtils.INVALID_FILE_ID);
 
-    createStoreInternal(fileId);
-    writeJournalEntry(newCreateStoreEntry(fileId));
-    flushJournal();
+    try (JournalContext journalContext = createJournalContext()) {
+      createStoreInternal(fileId);
+      journalContext.append(newCreateStoreEntry(fileId));
+    }
   }
 
   // Creates a store, called when replaying journals
@@ -251,9 +256,10 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
     long fileId = getFileId(uri);
     checkIsCompletePartition(fileId, uri);
     mFileSystemMaster.delete(uri, DeleteOptions.defaults().setRecursive(true));
-    deleteStoreInternal(fileId);
-    writeJournalEntry(newDeleteStoreEntry(fileId));
-    flushJournal();
+    try (JournalContext journalContext = createJournalContext()) {
+      deleteStoreInternal(fileId);
+      journalContext.append(newDeleteStoreEntry(fileId));
+    }
   }
 
   // Deletes a store, called when replaying journals.
@@ -266,8 +272,8 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
     mCompleteStoreToPartitions.remove(fileId);
   }
 
-  private long getFileId(AlluxioURI uri)
-      throws AccessControlException, FileDoesNotExistException, InvalidPathException {
+  private long getFileId(AlluxioURI uri) throws AccessControlException, FileDoesNotExistException,
+      InvalidPathException, UnavailableException {
     long fileId = mFileSystemMaster.getFileId(uri);
     if (fileId == IdUtils.INVALID_FILE_ID) {
       throw new FileDoesNotExistException(ExceptionMessage.PATH_DOES_NOT_EXIST.getMessage(uri));
@@ -295,10 +301,10 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
 
     final long newFileId = mFileSystemMaster.getFileId(newUri);
     Preconditions.checkState(newFileId != IdUtils.INVALID_FILE_ID);
-    renameStoreInternal(oldFileId, newFileId);
-
-    writeJournalEntry(newRenameStoreEntry(oldFileId, newFileId));
-    flushJournal();
+    try (JournalContext journalContext = createJournalContext()) {
+      renameStoreInternal(oldFileId, newFileId);
+      journalContext.append(newRenameStoreEntry(oldFileId, newFileId));
+    }
   }
 
   private void renameStoreInternal(long oldFileId, long newFileId) {
@@ -325,10 +331,10 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
         new AlluxioURI(PathUtils.concatPath(toUri.toString(),
             String.format("%s-%s", fromUri.getName(), UUID.randomUUID().toString()))),
         RenameOptions.defaults());
-    mergeStoreInternal(fromFileId, toFileId);
-
-    writeJournalEntry(newMergeStoreEntry(fromFileId, toFileId));
-    flushJournal();
+    try (JournalContext journalContext = createJournalContext()) {
+      mergeStoreInternal(fromFileId, toFileId);
+      journalContext.append(newMergeStoreEntry(fromFileId, toFileId));
+    }
   }
 
   // Internal implementation to merge two completed stores.
@@ -345,7 +351,8 @@ public class DefaultKeyValueMaster extends AbstractMaster implements KeyValueMas
 
   @Override
   public synchronized List<PartitionInfo> getPartitionInfo(AlluxioURI path)
-      throws FileDoesNotExistException, AccessControlException, InvalidPathException {
+      throws FileDoesNotExistException, AccessControlException, InvalidPathException,
+      UnavailableException {
     long fileId = getFileId(path);
     List<PartitionInfo> partitions = mCompleteStoreToPartitions.get(fileId);
     if (partitions == null) {

@@ -239,7 +239,8 @@ The `leader` command prints the current Alluxio leader master host name.
 
 ### load
 
-The `load` command moves data from the under storage system into Alluxio storage. If there is a Alluxio worker on the machine this command is run from, the data will be loaded to that worker. Otherwise, a random worker will be selected to serve the data. Load will no-op if the file is already in Alluxio memory level storage. If `load` is run on a directory, files in the directory will be recursively loaded.
+The `load` command moves data from the under storage system into Alluxio storage. If there is a Alluxio worker on the machine this command is run from, the data will be loaded to that worker. Otherwise, a random worker will be selected to serve the data.
+If the data is already loaded into Alluxio, load is a no-op unless the `--local flag` is used, it means that the `--local` flag will load data to a local worker even if the data is already available on remote workers. If `load` is run on a directory, files in the directory will be recursively loaded.
 
 For example, `load` can be used to prefetch data for analytics jobs.
 
@@ -277,12 +278,14 @@ size are loaded this way and no data transfer occurs.
 Options:
 
 * `-d` option lists the directories as plain files. For example, `ls -d /` shows the atrributes
-of root directory
+of root directory.
 * `-f` option forces loading metadata for immediate children in a directory. By default, it loads
 metadata only at the first time at which a directory is listed.
 * `-h` option displays file sizes in human-readable formats.
-* `-p` option lists all pinned files
+* `-p` option lists all pinned files.
 * `-R` option also recursively lists child directories, displaying the entire subtree starting from the input path.
+* `--sort` sorts the result by the given option. Possible values: `size|creationTime|inMemoryPercentage|lastModificationTime|path`
+* `-r` reverses the sorting order.
 
 For example, `ls` can be used to browse the file system.
 

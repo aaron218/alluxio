@@ -11,9 +11,10 @@
 
 package alluxio.client.block.stream;
 
+import static org.mockito.Mockito.mock;
+
 import alluxio.ConfigurationRule;
 import alluxio.Constants;
-import alluxio.EmbeddedChannels;
 import alluxio.PropertyKey;
 import alluxio.client.file.FileSystemContext;
 import alluxio.client.file.options.OutStreamOptions;
@@ -37,7 +38,6 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Mockito;
 import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
@@ -66,7 +66,7 @@ public final class NettyPacketWriterTest {
 
   private FileSystemContext mContext;
   private WorkerNetAddress mAddress;
-  private EmbeddedChannels.EmbeddedEmptyCtorChannel mChannel;
+  private EmbeddedChannel mChannel;
 
   @Rule
   public ConfigurationRule mConfigurationRule =
@@ -76,9 +76,9 @@ public final class NettyPacketWriterTest {
   @Before
   public void before() throws Exception {
     mContext = PowerMockito.mock(FileSystemContext.class);
-    mAddress = Mockito.mock(WorkerNetAddress.class);
+    mAddress = mock(WorkerNetAddress.class);
 
-    mChannel = new EmbeddedChannels.EmbeddedEmptyCtorChannel();
+    mChannel = new EmbeddedChannel();
     PowerMockito.when(mContext.acquireNettyChannel(mAddress)).thenReturn(mChannel);
     PowerMockito.doNothing().when(mContext).releaseNettyChannel(mAddress, mChannel);
   }
@@ -111,8 +111,8 @@ public final class NettyPacketWriterTest {
     long length = PACKET_SIZE * 1024 + PACKET_SIZE / 3;
     try (PacketWriter writer = create(length)) {
       checksumExpected = writeFile(writer, length, 0, length - 1);
-      checksumActual = verifyWriteRequests(mChannel, 0, length - 1);
       checksumExpected.get();
+      checksumActual = verifyWriteRequests(mChannel, 0, length - 1);
     }
     Assert.assertEquals(checksumExpected.get(), checksumActual.get());
   }
@@ -128,8 +128,8 @@ public final class NettyPacketWriterTest {
     long length = PACKET_SIZE * 1024 + PACKET_SIZE / 3;
     try (PacketWriter writer = create(length)) {
       checksumExpected = writeFile(writer, length, 10, length / 3);
-      checksumActual = verifyWriteRequests(mChannel, 10, length / 3);
       checksumExpected.get();
+      checksumActual = verifyWriteRequests(mChannel, 10, length / 3);
     }
     Assert.assertEquals(checksumExpected.get(), checksumActual.get());
   }
@@ -144,8 +144,8 @@ public final class NettyPacketWriterTest {
     long length = PACKET_SIZE * 1024;
     try (PacketWriter writer = create(Long.MAX_VALUE)) {
       checksumExpected = writeFile(writer, length, 10, length / 3);
-      checksumActual = verifyWriteRequests(mChannel, 10, length / 3);
       checksumExpected.get();
+      checksumActual = verifyWriteRequests(mChannel, 10, length / 3);
     }
     Assert.assertEquals(checksumExpected.get(), checksumActual.get());
   }
@@ -160,8 +160,8 @@ public final class NettyPacketWriterTest {
     long length = PACKET_SIZE * 30000 + PACKET_SIZE / 3;
     try (PacketWriter writer = create(Long.MAX_VALUE)) {
       checksumExpected = writeFile(writer, length, 10, length / 3);
-      checksumActual = verifyWriteRequests(mChannel, 10, length / 3);
       checksumExpected.get();
+      checksumActual = verifyWriteRequests(mChannel, 10, length / 3);
     }
     Assert.assertEquals(checksumExpected.get(), checksumActual.get());
   }

@@ -11,10 +11,9 @@
 
 package alluxio.master.journal;
 
-import alluxio.proto.journal.Journal.JournalEntry;
+import alluxio.exception.status.UnavailableException;
 
 import java.io.Closeable;
-import java.io.IOException;
 import java.net.URI;
 
 /**
@@ -27,15 +26,9 @@ public interface Journal extends Closeable {
   URI getLocation();
 
   /**
-   * Writes an entry. {@link #flush} should be called afterwards if we want to make sure the entry
-   * is persisted.
-   *
-   * @param entry the journal entry to write
+   * @return a journal context for appending journal entries
+   * @throws UnavailableException if a context cannot be created because the journal has been
+   *         closed.
    */
-  void write(JournalEntry entry) throws IOException;
-
-  /**
-   * Flushes all the entries written to the underlying storage.
-   */
-  void flush() throws IOException;
+  JournalContext createJournalContext() throws UnavailableException;
 }

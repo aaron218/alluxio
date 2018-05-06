@@ -18,16 +18,21 @@ import alluxio.RuntimeConstants;
 import alluxio.ServiceUtils;
 import alluxio.metrics.MetricsSystem;
 import alluxio.metrics.sink.MetricsServlet;
+import alluxio.metrics.sink.PrometheusMetricsServlet;
 import alluxio.network.ChannelType;
 import alluxio.security.authentication.TransportProvider;
 import alluxio.underfs.UfsManager;
 import alluxio.underfs.WorkerUfsManager;
 import alluxio.util.CommonUtils;
+import alluxio.util.JvmPauseMonitor;
 import alluxio.util.WaitForOptions;
+import alluxio.util.io.FileUtils;
+import alluxio.util.io.PathUtils;
 import alluxio.util.network.NetworkAddressUtils;
 import alluxio.util.network.NetworkAddressUtils.ServiceType;
 import alluxio.web.WebServer;
 import alluxio.web.WorkerWebServer;
+import alluxio.wire.TieredIdentity;
 import alluxio.wire.WorkerNetAddress;
 import alluxio.worker.block.BlockWorker;
 
@@ -49,6 +54,7 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
@@ -61,6 +67,8 @@ import javax.annotation.concurrent.NotThreadSafe;
 public final class AlluxioWorkerProcess implements WorkerProcess {
   private static final Logger LOG = LoggerFactory.getLogger(AlluxioWorkerProcess.class);
 
+  private final TieredIdentity mTieredIdentitiy;
+
   /** Server for data requests and responses. */
   private DataServer mDataServer;
 
@@ -71,6 +79,8 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
   private boolean mIsServingRPC = false;
 
   private final MetricsServlet mMetricsServlet = new MetricsServlet(MetricsSystem.METRIC_REGISTRY);
+  private final PrometheusMetricsServlet mPMetricsServlet = new PrometheusMetricsServlet(
+      MetricsSystem.METRIC_REGISTRY);
 
   /** The worker registry. */
   private WorkerRegistry mRegistry;
@@ -96,10 +106,14 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
   /** The manager for all ufs. */
   private UfsManager mUfsManager;
 
+  /** The jvm monitor.*/
+  private JvmPauseMonitor mJvmPauseMonitor;
+
   /**
    * Creates a new instance of {@link AlluxioWorkerProcess}.
    */
-  AlluxioWorkerProcess() {
+  AlluxioWorkerProcess(TieredIdentity tieredIdentity) {
+    mTieredIdentitiy = tieredIdentity;
     try {
       mStartTimeMs = System.currentTimeMillis();
       mUfsManager = new WorkerUfsManager();
@@ -116,7 +130,12 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
           }
         });
       }
-      CommonUtils.invokeAll(callables, 10, TimeUnit.SECONDS);
+      // In the worst case, each worker factory is blocked waiting for the dependent servers to be
+      // registered at worker registry, so the maximum timeout here is set to the multiply of
+      // the number of factories by the default timeout of getting a worker from the registry.
+      CommonUtils.invokeAll(callables,
+          (long) callables.size() * Constants.DEFAULT_REGISTRY_GET_TIMEOUT_MS,
+          TimeUnit.MILLISECONDS);
 
       // Setup web server
       mWebServer =
@@ -137,12 +156,19 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
       mDataServer = DataServer.Factory
           .create(NetworkAddressUtils.getBindAddress(ServiceType.WORKER_DATA), this);
 
+      // Setup domain socket data server
       if (isDomainSocketEnabled()) {
         String domainSocketPath =
             Configuration.get(PropertyKey.WORKER_DATA_SERVER_DOMAIN_SOCKET_ADDRESS);
+        if (Configuration.getBoolean(PropertyKey.WORKER_DATA_SERVER_DOMAIN_SOCKET_AS_UUID)) {
+          domainSocketPath =
+              PathUtils.concatPath(domainSocketPath, UUID.randomUUID().toString());
+        }
         LOG.info("Domain socket data server is enabled at {}.", domainSocketPath);
         mDomainSocketDataServer =
             DataServer.Factory.create(new DomainSocketAddress(domainSocketPath), this);
+        // Share domain socket so that clients can access it.
+        FileUtils.changeLocalFileToFullPermission(domainSocketPath);
       }
     } catch (Exception e) {
       throw new RuntimeException(e);
@@ -217,20 +243,37 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
 
     // Start serving the web server, this will not block.
     mWebServer.addHandler(mMetricsServlet.getHandler());
+    mWebServer.addHandler(mPMetricsServlet.getHandler());
     mWebServer.start();
+
+    // Start monitor jvm
+    if (Configuration.getBoolean(PropertyKey.WORKER_JVM_MONITOR_ENABLED)) {
+      mJvmPauseMonitor = new JvmPauseMonitor();
+      mJvmPauseMonitor.start();
+    }
 
     mIsServingRPC = true;
 
     // Start serving RPC, this will block
-    LOG.info("{} version {} started @ {}", this, RuntimeConstants.VERSION, mRpcAddress);
+    LOG.info("Alluxio worker version {} started. "
+            + "bindHost={}, connectHost={}, rpcPort={}, dataPort={}, webPort={}",
+        RuntimeConstants.VERSION,
+        NetworkAddressUtils.getBindHost(ServiceType.WORKER_RPC),
+        NetworkAddressUtils.getConnectHost(ServiceType.WORKER_RPC),
+        NetworkAddressUtils.getPort(ServiceType.WORKER_RPC),
+        NetworkAddressUtils.getPort(ServiceType.WORKER_DATA),
+        NetworkAddressUtils.getPort(ServiceType.WORKER_WEB));
     mThriftServer.serve();
-    LOG.info("{} version {} ended @ {}", this, RuntimeConstants.VERSION, mRpcAddress);
+    LOG.info("Alluxio worker ended");
   }
 
   @Override
   public void stop() throws Exception {
     if (mIsServingRPC) {
       stopServing();
+      if (mJvmPauseMonitor != null) {
+        mJvmPauseMonitor.stop();
+      }
       stopWorkers();
       mIsServingRPC = false;
     }
@@ -342,7 +385,8 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
         .setRpcPort(mRpcAddress.getPort())
         .setDataPort(getDataLocalPort())
         .setDomainSocketPath(getDataDomainSocketPath())
-        .setWebPort(mWebServer.getLocalPort());
+        .setWebPort(mWebServer.getLocalPort())
+        .setTieredIdentity(mTieredIdentitiy);
   }
 
   @Override

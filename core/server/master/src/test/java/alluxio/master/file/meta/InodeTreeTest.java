@@ -15,6 +15,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import alluxio.AlluxioURI;
 import alluxio.ConfigurationRule;
@@ -25,16 +26,17 @@ import alluxio.exception.ExceptionMessage;
 import alluxio.exception.FileAlreadyExistsException;
 import alluxio.exception.FileDoesNotExistException;
 import alluxio.exception.InvalidPathException;
+import alluxio.master.DefaultSafeModeManager;
 import alluxio.master.MasterRegistry;
+import alluxio.master.SafeModeManager;
 import alluxio.master.block.BlockMaster;
 import alluxio.master.block.BlockMasterFactory;
+import alluxio.master.file.RpcContext;
 import alluxio.master.file.options.CreateDirectoryOptions;
 import alluxio.master.file.options.CreateFileOptions;
 import alluxio.master.file.options.CreatePathOptions;
 import alluxio.master.file.options.DeleteOptions;
-import alluxio.master.journal.JournalContext;
 import alluxio.master.journal.JournalSystem;
-import alluxio.master.journal.NoopJournalContext;
 import alluxio.master.journal.noop.NoopJournalSystem;
 import alluxio.security.authorization.Mode;
 import alluxio.underfs.UfsManager;
@@ -51,7 +53,6 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 import org.junit.rules.TemporaryFolder;
-import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -77,6 +78,7 @@ public final class InodeTreeTest {
   private static CreateDirectoryOptions sNestedDirectoryOptions;
   private InodeTree mTree;
   private MasterRegistry mRegistry;
+  private SafeModeManager mSafeModeManager;
 
   /** Rule to create a new temporary folder during each test. */
   @Rule
@@ -99,10 +101,12 @@ public final class InodeTreeTest {
   @Before
   public void before() throws Exception {
     mRegistry = new MasterRegistry();
+    mSafeModeManager = new DefaultSafeModeManager();
     JournalSystem journalSystem = new NoopJournalSystem();
-    BlockMaster blockMaster = new BlockMasterFactory().create(mRegistry, journalSystem);
+    BlockMaster blockMaster = new BlockMasterFactory().create(mRegistry, journalSystem,
+        mSafeModeManager);
     InodeDirectoryIdGenerator directoryIdGenerator = new InodeDirectoryIdGenerator(blockMaster);
-    UfsManager ufsManager = Mockito.mock(UfsManager.class);
+    UfsManager ufsManager = mock(UfsManager.class);
     MountTable mountTable = new MountTable(ufsManager);
     mTree = new InodeTree(blockMaster, directoryIdGenerator, mountTable);
 
@@ -145,7 +149,7 @@ public final class InodeTreeTest {
   }
 
   /**
-   * Tests the {@link InodeTree#createPath(LockedInodePath, CreatePathOptions, JournalContext)}
+   * Tests the {@link InodeTree#createPath(RpcContext, LockedInodePath, CreatePathOptions)}
    * method for creating directories.
    */
   @Test
@@ -212,7 +216,7 @@ public final class InodeTreeTest {
   }
 
   /**
-   * Tests the {@link InodeTree#createPath(LockedInodePath, CreatePathOptions, JournalContext)}
+   * Tests the {@link InodeTree#createPath(RpcContext, LockedInodePath, CreatePathOptions)}
    * method for creating a file.
    */
   @Test
@@ -229,7 +233,7 @@ public final class InodeTreeTest {
   }
 
   /**
-   * Tests the {@link InodeTree#createPath(LockedInodePath, CreatePathOptions, JournalContext)}
+   * Tests the {@link InodeTree#createPath(RpcContext, LockedInodePath, CreatePathOptions)}
    * method.
    */
   @Test
@@ -598,6 +602,50 @@ public final class InodeTreeTest {
     }
   }
 
+  /**
+   * Tests if mode is set correctly in the {@link InodeTree#addInodeFileFromJournal} and
+   * {@link InodeTree#addInodeDirectoryFromJournal} methods for empty owner/group.
+   */
+  @Test
+  public void addInodeModeFromJournalWithEmptyOwnership() throws Exception {
+    createPath(mTree, NESTED_FILE_URI, sNestedFileOptions);
+    InodeDirectory root = mTree.getRoot();
+    InodeDirectory nested = (InodeDirectory) root.getChild("nested");
+    InodeDirectory test = (InodeDirectory) nested.getChild("test");
+    Inode<?> file = test.getChild("file");
+    Inode[] inodeChildren = {nested, test, file};
+    for (Inode child : inodeChildren) {
+      child.setOwner("");
+      child.setGroup("");
+      child.setMode((short) 0600);
+    }
+
+    // reset the tree
+    mTree.addInodeDirectoryFromJournal(root.toJournalEntry().getInodeDirectory());
+
+    // re-init the root since the tree was reset above
+    mTree.getRoot();
+
+    try (LockedInodePath inodePath =
+             mTree.lockFullInodePath(new AlluxioURI("/"), InodeTree.LockMode.READ)) {
+      try (InodeLockList lockList = mTree.lockDescendants(inodePath, InodeTree.LockMode.READ)) {
+        Assert.assertEquals(0, lockList.getInodes().size());
+      }
+      mTree.addInodeDirectoryFromJournal(nested.toJournalEntry().getInodeDirectory());
+      mTree.addInodeDirectoryFromJournal(test.toJournalEntry().getInodeDirectory());
+      mTree.addInodeFileFromJournal(file.toJournalEntry().getInodeFile());
+      try (InodeLockList lockList = mTree.lockDescendants(inodePath, InodeTree.LockMode.READ)) {
+        List<Inode<?>> children = lockList.getInodes();
+        Assert.assertEquals(inodeChildren.length, children.size());
+        for (Inode<?> child : children) {
+          Assert.assertEquals("", child.getOwner());
+          Assert.assertEquals("", child.getGroup());
+          Assert.assertEquals((short) 0600, child.getMode());
+        }
+      }
+    }
+  }
+
   @Test
   public void getInodePathById() throws Exception {
     try (LockedInodePath rootPath = mTree.lockFullInodePath(0, InodeTree.LockMode.READ)) {
@@ -735,11 +783,11 @@ public final class InodeTreeTest {
   }
 
   // Helper to create a path.
-  InodeTree.CreatePathResult createPath(InodeTree root, AlluxioURI path,
+  private InodeTree.CreatePathResult createPath(InodeTree root, AlluxioURI path,
       CreatePathOptions<?> options) throws FileAlreadyExistsException, BlockInfoException,
       InvalidPathException, IOException, FileDoesNotExistException {
     try (LockedInodePath inodePath = root.lockInodePath(path, InodeTree.LockMode.WRITE)) {
-      return root.createPath(inodePath, options, new NoopJournalContext());
+      return root.createPath(RpcContext.NOOP, inodePath, options);
     }
   }
 
@@ -753,8 +801,8 @@ public final class InodeTreeTest {
   // Helper to delete an inode by path.
   private static void deleteInodeByPath(InodeTree root, AlluxioURI path) throws Exception {
     try (LockedInodePath inodePath = root.lockFullInodePath(path, InodeTree.LockMode.WRITE)) {
-      root.deleteInode(inodePath, System.currentTimeMillis(), DeleteOptions.defaults(),
-          NoopJournalContext.INSTANCE);
+      root.deleteInode(RpcContext.NOOP, inodePath, System.currentTimeMillis(),
+          DeleteOptions.defaults());
     }
   }
 

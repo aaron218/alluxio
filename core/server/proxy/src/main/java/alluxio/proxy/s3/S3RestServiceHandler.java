@@ -212,7 +212,7 @@ public final class S3RestServiceHandler {
   @PUT
   @Path(OBJECT_PARAM)
   @ReturnType("java.lang.Void")
-  @Consumes(MediaType.APPLICATION_OCTET_STREAM)
+  @Consumes(MediaType.WILDCARD)
   public Response createObjectOrUploadPart(@HeaderParam("Content-MD5") final String contentMD5,
       @PathParam("bucket") final String bucket,
       @PathParam("object") final String object,
@@ -287,8 +287,6 @@ public final class S3RestServiceHandler {
    */
   @POST
   @Path(OBJECT_PARAM)
-  @ReturnType("alluxio.proxy.s3.InitiateMultipartUploadResult,"
-      + "alluxio.proxy.s3.CompleteMultipartUploadResult")
   // TODO(cc): investigate on how to specify multiple return types, and how to decouple the REST
   // endpoints where the only difference is the query parameter.
   public Response initiateOrCompleteMultipartUpload(@PathParam("bucket") final String bucket,
@@ -416,7 +414,6 @@ public final class S3RestServiceHandler {
    */
   @GET
   @Path(OBJECT_PARAM)
-  @ReturnType("java.io.InputStream, alluxio.proxy.s3.ListPartsResult")
   @Produces({MediaType.APPLICATION_XML, MediaType.APPLICATION_OCTET_STREAM})
   public Response getObjectOrListParts(@PathParam("bucket") final String bucket,
       @PathParam("object") final String object, @QueryParam("uploadId") final Long uploadId) {
