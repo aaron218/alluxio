@@ -398,6 +398,18 @@ public class UfsSyncIntegrationTest extends BaseIntegrationTest {
     listing = mFileSystem.listStatus(new AlluxioURI("/nested/mnt/"), options);
     Assert.assertEquals(1, listing.size());
     Assert.assertEquals("ufs", listing.get(0).getName());
+
+    // adding a file into the nested mount point
+    writeUfsFile(ufsPath + "/nestedufs", 1);
+
+    // recursively sync (setAttribute enables recursive sync)
+    mFileSystem.setAttribute(new AlluxioURI("/"),
+        SetAttributeOptions.defaults().setCommonOptions(SYNC_ALWAYS).setRecursive(true)
+            .setTtl(44444));
+    // Verify /nested/mnt/ufs dir has 1 file
+    listing = mFileSystem.listStatus(new AlluxioURI("/nested/mnt/ufs"), options);
+    Assert.assertEquals(1, listing.size());
+    Assert.assertEquals("nestedufs", listing.get(0).getName());
   }
 
   @Test
@@ -435,14 +447,14 @@ public class UfsSyncIntegrationTest extends BaseIntegrationTest {
 
     // Set initial alluxio permissions
     mFileSystem.setAttribute(new AlluxioURI(alluxioPath(EXISTING_FILE)),
-        SetAttributeOptions.defaults().setMode(new Mode((short) 777)));
+        SetAttributeOptions.defaults().setMode(new Mode((short) 0777)));
 
     URIStatus status = mFileSystem.getStatus(new AlluxioURI(alluxioPath(EXISTING_FILE)), options);
     String startFingerprint = status.getUfsFingerprint();
 
     // Change alluxio permissions
     mFileSystem.setAttribute(new AlluxioURI(alluxioPath(EXISTING_FILE)),
-        SetAttributeOptions.defaults().setMode(new Mode((short) 655)));
+        SetAttributeOptions.defaults().setMode(new Mode((short) 0655)));
 
     status = mFileSystem.getStatus(new AlluxioURI(alluxioPath(EXISTING_FILE)), options);
     String endFingerprint = status.getUfsFingerprint();
@@ -524,7 +536,7 @@ public class UfsSyncIntegrationTest extends BaseIntegrationTest {
         ExistsOptions.defaults().setCommonOptions(SYNC_ALWAYS)));
     mFileSystem.free(new AlluxioURI("/"), FreeOptions.defaults().setRecursive(true));
     BlockMasterClient blockClient = BlockMasterClient.Factory.create(MasterClientConfig.defaults());
-    CommonUtils.waitFor("data to be freed", (x) -> {
+    CommonUtils.waitFor("data to be freed", () -> {
       try {
         return blockClient.getUsedBytes() == 0;
       } catch (Exception e) {

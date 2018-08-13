@@ -15,11 +15,12 @@ This document describes the following security related features in Alluxio.
 Alluxio file system recognizes the user accessing the service.
 Having `SIMPLE` authentication is required to use other security features such as authorization.
 Alluxio also supports other authentication modes like `NOSASL` and `CUSTOM`.
-2. [Authorization](#authorization): If `alluxio.security.authorization.permission.enabled=true`
+1. [Authorization](#authorization): If `alluxio.security.authorization.permission.enabled=true`
 (by default), Alluxio file system will grant or deny user access based on the requesting user and
 the POSIX permission model of the files or directories to access.
 Note that, authentication cannot be `NOSASL` as authorization requires user information.
-3. [Auditing](#auditing): If `alluxio.master.audit.logging.enabled=true`, Alluxio file system
+1. [Impersonation](#impersonation): Alluxio supports user impersonation so one user can access Alluxio on the behalf of another user. This can be useful if an Alluxio client is part of a service which provides access to Alluxio for many different users.
+1. [Auditing](#auditing): If `alluxio.master.audit.logging.enabled=true`, Alluxio file system
 maintains an audit log for user accesses to file metadata.
 
 See [Security specific configuration](Configuration-Settings.html#security-configuration) for
@@ -115,7 +116,7 @@ The umask can be set by property `alluxio.security.authorization.permission.umas
 
 The owner, group, and permissions can be changed by two ways:
 
-1. User application invokes the setAttribute(...) method of `FileSystem API` or `Hadoop API`. See
+1. User application invokes the `setAttribute(...)` method of `FileSystem API` or `Hadoop API`. See
 [File System API](File-System-API.html).
 2. CLI command in shell. See
 [chown](Command-Line-Interface.html#chown),
@@ -124,6 +125,54 @@ The owner, group, and permissions can be changed by two ways:
 
 The owner can only be changed by super user.
 The group and permission can only be changed by super user and file owner.
+
+## Impersonation
+Alluxio supports user impersonation in order for a user to access Alluxio on the behalf of another user.
+This can be useful if an Alluxio client is part of a service which provides access to Alluxio for many
+different users. In this scenario, the Alluxio client can be configured to connect to Alluxio servers
+with a particular user (the connection user), but act on behalf of other users (impersonation users).
+In order to configure Alluxio for impersonation, client and master configuration are required.
+
+### Master Configuration
+In order to enable a particular user to impersonate other users, the Alluxio master must be configured
+to allow that ability. 
+The master configuration properties are: `alluxio.master.security.impersonation.<USERNAME>.users` and
+`alluxio.master.security.impersonation.<USERNAME>.groups`.
+
+For `alluxio.master.security.impersonation.<USERNAME>.users`, you can specify the comma-separated list
+of users that the `<USERNAME>` is allowed to impersonate. The wildcard `*` can be used to indicate that
+the user can impersonate any other user. Here are some examples.
+
+- `alluxio.master.security.impersonation.alluxio_user.users=user1,user2`
+    - This means the Alluxio user `alluxio_user` is allowed to impersonate the users `user1` and `user2`.
+- `alluxio.master.security.impersonation.client.users=*`
+    - This means the Alluxio user `client` is allowed to impersonate any user.
+
+For `alluxio.master.security.impersonation.<USERNAME>.groups`, you can specify the comma-separated groups
+of users that the `<USERNAME>` is allowed to impersonate. The wildcard `*` can be used to indicate that
+the user can impersonate any other user. Here are some examples.
+
+- `alluxio.master.security.impersonation.alluxio_user.groups=group1,group2`
+    - This means the Alluxio user `alluxio_user` is allowed to impersonate any users from groups `group1` and `group2`.
+- `alluxio.master.security.impersonation.client.groups=*`
+    - This means the Alluxio user `client` is allowed to impersonate any user.
+
+In order to enable impersonation for some user `alluxio_user`, at least 1 of
+`alluxio.master.security.impersonation.<USERNAME>.users` and `alluxio.master.security.impersonation.<USERNAME>.groups`
+must be set (replace `<USERNAME>` with `alluxio_user`). Both parameters are allowed to be set for the same user.
+
+### Client Configuration
+If the master enables impersonation for particular users, the client must also be configured to
+impersonate other users. This is configured with the parameter: `alluxio.security.login.impersonation.username` .
+This informs the Alluxio client to connect as usual, but impersonate as a different user. The
+parameter can set to the following values:
+
+- empty
+  - Alluxio client impersonation is not used
+- `_NONE_`
+  - Alluxio client impersonation is not used
+- `_HDFS_USER_`
+  - the Alluxio client will impersonate as the same user as the HDFS client (when using the Hadoop compatible client.)
 
 ## Auditing
 Alluxio supports audit logging to allow system administrators to track users' access to file metadata.

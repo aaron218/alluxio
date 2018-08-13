@@ -16,13 +16,13 @@ import alluxio.Configuration;
 import alluxio.Constants;
 import alluxio.PropertyKey;
 import alluxio.client.file.FileSystem;
+import alluxio.client.file.FileSystemContext;
 import alluxio.underfs.UnderFileSystem;
 import alluxio.underfs.options.DeleteOptions;
 import alluxio.util.CommonUtils;
 import alluxio.util.WaitForOptions;
 import alluxio.zookeeper.RestartableTestingServer;
 
-import com.google.common.base.Function;
 import com.google.common.base.Throwables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -74,6 +75,11 @@ public final class MultiMasterLocalAlluxioCluster extends AbstractLocalAlluxioCl
   @Override
   public synchronized FileSystem getClient() throws IOException {
     return getLocalAlluxioMaster().getClient();
+  }
+
+  @Override
+  public FileSystem getClient(FileSystemContext context) throws IOException {
+    return getLocalAlluxioMaster().getClient(context);
   }
 
   /**
@@ -155,13 +161,9 @@ public final class MultiMasterLocalAlluxioCluster extends AbstractLocalAlluxioCl
    *
    * @param timeoutMs the number of milliseconds to wait before giving up and throwing an exception
    */
-  public void waitForNewMaster(int timeoutMs) {
-    CommonUtils.waitFor("the new leader master to start", new Function<Void, Boolean>() {
-      @Override
-      public Boolean apply(Void input) {
-        return getLeaderIndex() != -1;
-      }
-    }, WaitForOptions.defaults().setTimeoutMs(timeoutMs));
+  public void waitForNewMaster(int timeoutMs) throws TimeoutException, InterruptedException {
+    CommonUtils.waitFor("the new leader master to start", () -> getLeaderIndex() != -1,
+        WaitForOptions.defaults().setTimeoutMs(timeoutMs));
   }
 
   /**

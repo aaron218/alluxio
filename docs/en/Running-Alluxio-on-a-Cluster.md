@@ -41,7 +41,9 @@ instructions to set up S3 as Alluxio's under storage.
 
 Finally, sync all the information to the worker nodes. You can use
 
-{% include Running-Alluxio-on-a-Cluster/sync-info.md %}
+```bash
+$ ./bin/alluxio copyDir <dirname>
+```
 
 to sync files and folders to all hosts specified in the `alluxio/conf/workers` file. If you have
 downloaded and extracted Alluxio tar file on the master only, you can use the `copyDir` command
@@ -52,7 +54,12 @@ to sync any change to `conf/alluxio-site.properties` to the workers.
 
 Now, you can start Alluxio:
 
-{% include Running-Alluxio-on-a-Cluster/start-Alluxio.md %}
+```bash
+$ cd alluxio
+$ ./bin/alluxio format
+$ ./bin/alluxio-start.sh # use the right parameters here. e.g. all Mount
+# Notice: the Mount and SudoMount parameters will format the existing RamFS.
+```
 
 To verify that Alluxio is running, you can visit `http://<alluxio_master_hostname>:19999`, check the
 log in the directory `alluxio/logs`, or run a sample program:
@@ -164,6 +171,9 @@ Also, specify the correct journal folder by setting `alluxio.master.journal.fold
 
     alluxio.master.journal.folder=hdfs://[namenodeserver]:[namenodeport]/path/to/alluxio/journal
 
+In addition, be sure to list all the masters' addresses in `conf/masters`. This allows the
+startup script to start Alluxio master processes on the appropriate machines. 
+
 Once all the Alluxio masters are configured in this way, they can all be started to achieve highly
 available Alluxio. One of the masters will become the leader, and the others will replay the journal
 and wait until the current master dies.
@@ -194,7 +204,7 @@ Any host provided in the URL is ignored; `alluxio.zookeeper.address` is used ins
 Alluxio leader master.
 
 ```
-hadoop fs -ls alluxio:///directory
+$ hadoop fs -ls alluxio:///directory
 ```
 
 #### Automatic Fail Over
