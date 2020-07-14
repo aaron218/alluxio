@@ -11,10 +11,24 @@
 
 package alluxio.fuse;
 
+import alluxio.conf.InstancedConfiguration;
+import alluxio.conf.PropertyKey;
+import alluxio.exception.AccessControlException;
+import alluxio.exception.AlluxioException;
+import alluxio.exception.BlockDoesNotExistException;
+import alluxio.exception.ConnectionFailedException;
+import alluxio.exception.DirectoryNotEmptyException;
+import alluxio.exception.FileAlreadyCompletedException;
+import alluxio.exception.FileAlreadyExistsException;
+import alluxio.exception.FileDoesNotExistException;
+import alluxio.exception.InvalidPathException;
+import alluxio.util.ConfigurationUtils;
+import alluxio.util.OSUtils;
 import alluxio.util.ShellUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.serce.jnrfuse.ErrorCodes;
 
 import java.io.IOException;
 
@@ -26,6 +40,8 @@ import javax.annotation.concurrent.ThreadSafe;
 @ThreadSafe
 public final class AlluxioFuseUtils {
   private static final Logger LOG = LoggerFactory.getLogger(AlluxioFuseUtils.class);
+  private static final long THRESHOLD = new InstancedConfiguration(ConfigurationUtils.defaults())
+      .getMs(PropertyKey.FUSE_LOGGING_THRESHOLD);
 
   private AlluxioFuseUtils() {}
 
@@ -50,6 +66,30 @@ public final class AlluxioFuseUtils {
   }
 
   /**
+   * Retrieves the gid of the given group.
+   *
+   * @param groupName the group name
+   * @return gid
+   */
+  public static long getGidFromGroupName(String groupName) throws IOException {
+    String result = "";
+    if (OSUtils.isLinux()) {
+      String script = "getent group " + groupName + " | cut -d: -f3";
+      result = ShellUtils.execCommand("bash", "-c", script).trim();
+    } else if (OSUtils.isMacOS()) {
+      String script = "dscl . -read /Groups/" + groupName
+          + " | awk '($1 == \"PrimaryGroupID:\") { print $2 }'";
+      result = ShellUtils.execCommand("bash", "-c", script).trim();
+    }
+    try {
+      return Long.parseLong(result);
+    } catch (NumberFormatException e) {
+      LOG.error("Failed to get gid from group name {}.", groupName);
+      return -1;
+    }
+  }
+
+  /**
    * Gets the user name from the user id.
    *
    * @param uid user id
@@ -60,13 +100,53 @@ public final class AlluxioFuseUtils {
   }
 
   /**
-   * Gets the group name from the user id.
+   * Gets the primary group name from the user name.
    *
-   * @param uid user id
+   * @param userName the user name
    * @return group name
    */
-  public static String getGroupName(long uid) throws IOException {
-    return ShellUtils.execCommand("id", "-ng", Long.toString(uid)).trim();
+  public static String getGroupName(String userName) throws IOException {
+    return ShellUtils.execCommand("id", "-ng", userName).trim();
+  }
+
+  /**
+   * Gets the group name from the group id.
+   *
+   * @param gid the group id
+   * @return group name
+   */
+  public static String getGroupName(long gid) throws IOException {
+    if (OSUtils.isLinux()) {
+      String script = "getent group " + gid + " | cut -d: -f1";
+      return ShellUtils.execCommand("bash", "-c", script).trim();
+    } else if (OSUtils.isMacOS()) {
+      String script = "dscl . list /Groups PrimaryGroupID | awk '($2 == \""
+          + gid + "\") { print $1 }'";
+      return ShellUtils.execCommand("bash", "-c", script).trim();
+    }
+    return "";
+  }
+
+  /**
+   * Checks whether fuse is installed in local file system.
+   * Alluxio-Fuse only support mac and linux.
+   *
+   * @return true if fuse is installed, false otherwise
+   */
+  public static boolean isFuseInstalled() {
+    try {
+      if (OSUtils.isLinux()) {
+        String result = ShellUtils.execCommand("fusermount", "-V");
+        return !result.isEmpty();
+      } else if (OSUtils.isMacOS()) {
+        String result = ShellUtils.execCommand("bash", "-c",
+            "pkgutil --pkgs | grep -i com.github.osxfuse.pkg.Core");
+        return !result.isEmpty();
+      }
+    } catch (Exception e) {
+      return false;
+    }
+    return false;
   }
 
   /**
@@ -85,5 +165,90 @@ public final class AlluxioFuseUtils {
       return -1;
     }
     return Long.parseLong(output);
+  }
+
+  /**
+   * Gets the corresponding error code of a throwable.
+   *
+   * @param t throwable
+   * @return the corresponding error code
+   */
+  public static int getErrorCode(Throwable t) {
+    // Error codes and their explanations are described in
+    // the Errno.java in jnr-constants
+    if (t instanceof AlluxioException) {
+      return getAlluxioErrorCode((AlluxioException) t);
+    } else if (t instanceof IOException) {
+      return -ErrorCodes.EIO();
+    } else {
+      return -ErrorCodes.EBADMSG();
+    }
+  }
+
+  /**
+   * Gets the corresponding error code of an Alluxio exception.
+   *
+   * @param e an Alluxio exception
+   * @return the corresponding error code
+   */
+  private static int getAlluxioErrorCode(AlluxioException e) {
+    try {
+      throw e;
+    } catch (FileDoesNotExistException ex) {
+      return -ErrorCodes.ENOENT();
+    } catch (FileAlreadyExistsException ex) {
+      return -ErrorCodes.EEXIST();
+    } catch (InvalidPathException ex) {
+      return -ErrorCodes.EFAULT();
+    } catch (BlockDoesNotExistException ex) {
+      return -ErrorCodes.ENODATA();
+    } catch (DirectoryNotEmptyException ex) {
+      return -ErrorCodes.ENOTEMPTY();
+    } catch (AccessControlException ex) {
+      return -ErrorCodes.EACCES();
+    } catch (ConnectionFailedException ex) {
+      return -ErrorCodes.ECONNREFUSED();
+    } catch (FileAlreadyCompletedException ex) {
+      return -ErrorCodes.EOPNOTSUPP();
+    } catch (AlluxioException ex) {
+      return -ErrorCodes.EBADMSG();
+    }
+  }
+
+  /**
+   * An interface representing a callable for FUSE APIs.
+   */
+  public interface FuseCallable {
+    /**
+     * The RPC implementation.
+     *
+     * @return the return value from the RPC
+     */
+    int call();
+  }
+
+  /**
+   * Calls the given {@link FuseCallable} and returns its result.
+   *
+   * @param logger the logger to use for this call
+   * @param callable the callable to call
+   * @param methodName the name of the method, used for metrics
+   * @param description the format string of the description, used for logging
+   * @param args the arguments for the description
+   * @return the result
+   */
+  public static int call(Logger logger, FuseCallable callable, String methodName,
+      String description, Object... args) {
+    String debugDesc = logger.isDebugEnabled() ? String.format(description, args) : null;
+    logger.debug("Enter: {}({})", methodName, debugDesc);
+    long startMs = System.currentTimeMillis();
+    int ret = callable.call();
+    long durationMs = System.currentTimeMillis() - startMs;
+    logger.debug("Exit ({}): {}({}) in {} ms", ret, methodName, debugDesc, durationMs);
+    if (durationMs >= THRESHOLD) {
+      logger.warn("{}({}) returned {} in {} ms (>={} ms)",
+          methodName, String.format(description, args), ret, durationMs, THRESHOLD);
+    }
+    return ret;
   }
 }

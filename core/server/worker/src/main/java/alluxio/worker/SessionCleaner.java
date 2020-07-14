@@ -11,8 +11,8 @@
 
 package alluxio.worker;
 
-import alluxio.Configuration;
-import alluxio.PropertyKey;
+import alluxio.conf.ServerConfiguration;
+import alluxio.conf.PropertyKey;
 import alluxio.Sessions;
 import alluxio.util.CommonUtils;
 
@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.concurrent.NotThreadSafe;
+import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -29,7 +30,7 @@ import java.util.List;
  * worker-to-master heartbeat configurations.
  */
 @NotThreadSafe
-public final class SessionCleaner implements Runnable {
+public final class SessionCleaner implements Runnable, Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(SessionCleaner.class);
 
   /** The object which supports cleaning up sessions. */
@@ -52,7 +53,8 @@ public final class SessionCleaner implements Runnable {
     for (SessionCleanable sc : sessionCleanable) {
       mSessionCleanables.add(sc);
     }
-    mCheckIntervalMs = (int) Configuration.getMs(PropertyKey.WORKER_BLOCK_HEARTBEAT_INTERVAL_MS);
+    mCheckIntervalMs = (int) ServerConfiguration
+        .getMs(PropertyKey.WORKER_BLOCK_HEARTBEAT_INTERVAL_MS);
 
     mRunning = true;
   }
@@ -68,7 +70,10 @@ public final class SessionCleaner implements Runnable {
       long lastIntervalMs = System.currentTimeMillis() - lastCheckMs;
       long toSleepMs = mCheckIntervalMs - lastIntervalMs;
       if (toSleepMs > 0) {
-        CommonUtils.sleepMs(LOG, toSleepMs);
+        CommonUtils.sleepMs(null, toSleepMs);
+        if (Thread.interrupted()) {
+          break;
+        }
       } else {
         LOG.warn("Session cleanup took: {}, expected: {}", lastIntervalMs, mCheckIntervalMs);
       }
@@ -87,7 +92,7 @@ public final class SessionCleaner implements Runnable {
   /**
    * Stops the checking, once this method is called, the object should be discarded.
    */
-  public void stop() {
+  public void close() {
     mRunning = false;
   }
 }

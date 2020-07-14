@@ -12,10 +12,10 @@
 package alluxio.client.cli.fs.command;
 
 import alluxio.AlluxioURI;
-import alluxio.client.WriteType;
 import alluxio.client.file.FileSystemTestUtils;
 import alluxio.exception.AlluxioException;
 import alluxio.client.cli.fs.AbstractFileSystemShellTest;
+import alluxio.grpc.WritePType;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -28,13 +28,12 @@ import java.io.IOException;
 public final class ChgrpCommandIntegrationTest extends AbstractFileSystemShellTest {
   @Test
   public void chgrp() throws IOException, AlluxioException {
-    clearLoginUser();
-    FileSystemTestUtils.createByteFile(mFileSystem, "/testFile", WriteType.MUST_CACHE, 10);
-    mFsShell.run("chgrp", "group1", "/testFile");
-    String group = mFileSystem.getStatus(new AlluxioURI("/testFile")).getGroup();
+    FileSystemTestUtils.createByteFile(sFileSystem, "/testFile", WritePType.MUST_CACHE, 10);
+    sFsShell.run("chgrp", "group1", "/testFile");
+    String group = sFileSystem.getStatus(new AlluxioURI("/testFile")).getGroup();
     Assert.assertEquals("group1", group);
-    mFsShell.run("chgrp", "group2", "/testFile");
-    group = mFileSystem.getStatus(new AlluxioURI("/testFile")).getGroup();
+    sFsShell.run("chgrp", "group2", "/testFile");
+    group = sFileSystem.getStatus(new AlluxioURI("/testFile")).getGroup();
     Assert.assertEquals("group2", group);
   }
 
@@ -43,17 +42,17 @@ public final class ChgrpCommandIntegrationTest extends AbstractFileSystemShellTe
    */
   @Test
   public void chgrpRecursive() throws IOException, AlluxioException {
-    clearLoginUser();
-    FileSystemTestUtils.createByteFile(mFileSystem, "/testDir/testFile", WriteType.MUST_CACHE, 10);
+    FileSystemTestUtils.createByteFile(sFileSystem, "/testDir/testFile",
+        WritePType.MUST_CACHE, 10);
     // "chgrp -R group1 /testDir" should apply to both dir and child file
-    mFsShell.run("chgrp", "-R", "group1", "/testDir");
-    String group = mFileSystem.getStatus(new AlluxioURI("/testDir")).getGroup();
+    sFsShell.run("chgrp", "-R", "group1", "/testDir");
+    String group = sFileSystem.getStatus(new AlluxioURI("/testDir")).getGroup();
     Assert.assertEquals("group1", group);
-    group = mFileSystem.getStatus(new AlluxioURI("/testDir/testFile")).getGroup();
+    group = sFileSystem.getStatus(new AlluxioURI("/testDir/testFile")).getGroup();
     Assert.assertEquals("group1", group);
     // chgrp to another group.
-    mFsShell.run("chgrp", "-R", "group2", "/testDir");
-    group = mFileSystem.getStatus(new AlluxioURI("/testDir/testFile")).getGroup();
+    sFsShell.run("chgrp", "-R", "group2", "/testDir");
+    group = sFileSystem.getStatus(new AlluxioURI("/testDir/testFile")).getGroup();
     Assert.assertEquals("group2", group);
   }
 
@@ -62,28 +61,27 @@ public final class ChgrpCommandIntegrationTest extends AbstractFileSystemShellTe
    */
   @Test
   public void chgrpWildcard() throws IOException, AlluxioException {
-    clearLoginUser();
-    FileSystemTestUtils.createByteFile(mFileSystem,
-            "/testDir/foo/testFile1", WriteType.MUST_CACHE, 10);
-    FileSystemTestUtils.createByteFile(mFileSystem,
-            "/testDir/foo/testFile2", WriteType.MUST_CACHE, 10);
-    FileSystemTestUtils.createByteFile(mFileSystem,
-            "/testDir/bar/testFile3", WriteType.MUST_CACHE, 10);
+    FileSystemTestUtils.createByteFile(sFileSystem, "/testDir/foo/testFile1",
+        WritePType.MUST_CACHE, 10);
+    FileSystemTestUtils.createByteFile(sFileSystem, "/testDir/foo/testFile2",
+        WritePType.MUST_CACHE, 10);
+    FileSystemTestUtils.createByteFile(sFileSystem, "/testDir/bar/testFile3",
+        WritePType.MUST_CACHE, 10);
 
-    mFsShell.run("chgrp", "group1", "/testDir/*/testFile*");
-    String group = mFileSystem.getStatus(new AlluxioURI("/testDir/foo/testFile1")).getGroup();
+    sFsShell.run("chgrp", "group1", "/testDir/*/testFile*");
+    String group = sFileSystem.getStatus(new AlluxioURI("/testDir/foo/testFile1")).getGroup();
     Assert.assertEquals("group1", group);
-    group = mFileSystem.getStatus(new AlluxioURI("/testDir/foo/testFile2")).getGroup();
+    group = sFileSystem.getStatus(new AlluxioURI("/testDir/foo/testFile2")).getGroup();
     Assert.assertEquals("group1", group);
-    group = mFileSystem.getStatus(new AlluxioURI("/testDir/bar/testFile3")).getGroup();
+    group = sFileSystem.getStatus(new AlluxioURI("/testDir/bar/testFile3")).getGroup();
     Assert.assertEquals("group1", group);
     // chgrp to another group.
-    mFsShell.run("chgrp", "group2", "/testDir/*/testFile*");
-    group = mFileSystem.getStatus(new AlluxioURI("/testDir/foo/testFile1")).getGroup();
+    sFsShell.run("chgrp", "group2", "/testDir/*/testFile*");
+    group = sFileSystem.getStatus(new AlluxioURI("/testDir/foo/testFile1")).getGroup();
     Assert.assertEquals("group2", group);
-    group = mFileSystem.getStatus(new AlluxioURI("/testDir/foo/testFile2")).getGroup();
+    group = sFileSystem.getStatus(new AlluxioURI("/testDir/foo/testFile2")).getGroup();
     Assert.assertEquals("group2", group);
-    group = mFileSystem.getStatus(new AlluxioURI("/testDir/bar/testFile3")).getGroup();
+    group = sFileSystem.getStatus(new AlluxioURI("/testDir/bar/testFile3")).getGroup();
     Assert.assertEquals("group2", group);
   }
 }

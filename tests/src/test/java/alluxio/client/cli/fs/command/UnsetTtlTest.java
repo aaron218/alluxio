@@ -15,9 +15,9 @@ import static org.junit.Assert.assertEquals;
 
 import alluxio.AlluxioURI;
 import alluxio.Constants;
-import alluxio.client.WriteType;
 import alluxio.client.file.FileSystemTestUtils;
 import alluxio.client.cli.fs.AbstractFileSystemShellTest;
+import alluxio.grpc.WritePType;
 
 import org.junit.Test;
 
@@ -29,17 +29,17 @@ public final class UnsetTtlTest extends AbstractFileSystemShellTest {
   public void unsetTtl() throws Exception {
     String filePath = "/testFile";
     AlluxioURI uri = new AlluxioURI("/testFile");
-    FileSystemTestUtils.createByteFile(mFileSystem, filePath, WriteType.MUST_CACHE, 1);
-    assertEquals(Constants.NO_TTL, mFileSystem.getStatus(uri).getTtl());
+    FileSystemTestUtils.createByteFile(sFileSystem, filePath, WritePType.MUST_CACHE, 1);
+    assertEquals(Constants.NO_TTL, sFileSystem.getStatus(uri).getTtl());
 
     // unsetTTL on a file originally with no TTL will leave the TTL unchanged.
-    assertEquals(0, mFsShell.run("unsetTtl", filePath));
-    assertEquals(Constants.NO_TTL, mFileSystem.getStatus(uri).getTtl());
+    assertEquals(0, sFsShell.run("unsetTtl", filePath));
+    assertEquals(Constants.NO_TTL, sFileSystem.getStatus(uri).getTtl());
 
     long ttl = 1000L;
-    assertEquals(0, mFsShell.run("setTtl", filePath, String.valueOf(ttl)));
-    assertEquals(ttl, mFileSystem.getStatus(uri).getTtl());
-    assertEquals(0, mFsShell.run("unsetTtl", filePath));
-    assertEquals(Constants.NO_TTL, mFileSystem.getStatus(uri).getTtl());
+    assertEquals(0, sFsShell.run("setTtl", filePath, String.valueOf(ttl)));
+    assertEquals(ttl, sFileSystem.getStatus(uri).getTtl());
+    assertEquals(0, sFsShell.run("unsetTtl", filePath));
+    assertEquals(Constants.NO_TTL, sFileSystem.getStatus(uri).getTtl());
   }
 }

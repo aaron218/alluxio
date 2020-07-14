@@ -13,10 +13,10 @@ package alluxio.client.cli.fs.command;
 
 import static org.junit.Assert.assertEquals;
 
-import alluxio.client.WriteType;
 import alluxio.client.file.FileSystemTestUtils;
 import alluxio.exception.ExceptionMessage;
 import alluxio.client.cli.fs.AbstractFileSystemShellTest;
+import alluxio.grpc.WritePType;
 
 import org.junit.Test;
 
@@ -26,7 +26,7 @@ import org.junit.Test;
 public final class CountCommandTest extends AbstractFileSystemShellTest {
   @Test
   public void countNotExist() throws Exception {
-    int ret = mFsShell.run("count", "/NotExistFile");
+    int ret = sFsShell.run("count", "/NotExistFile");
     assertEquals(ExceptionMessage.PATH_DOES_NOT_EXIST.getMessage("/NotExistFile") + "\n",
         mOutput.toString());
     assertEquals(-1, ret);
@@ -34,17 +34,24 @@ public final class CountCommandTest extends AbstractFileSystemShellTest {
 
   @Test
   public void count() throws Exception {
-    FileSystemTestUtils
-        .createByteFile(mFileSystem, "/testRoot/testFileA", WriteType.MUST_CACHE, 10);
-    FileSystemTestUtils.createByteFile(mFileSystem, "/testRoot/testDir/testFileB",
-        WriteType.MUST_CACHE, 20);
-    FileSystemTestUtils
-        .createByteFile(mFileSystem, "/testRoot/testFileB", WriteType.MUST_CACHE, 30);
-    mFsShell.run("count", "/testRoot");
+    FileSystemTestUtils.createByteFile(sFileSystem, "/testRoot/testFileA",
+        WritePType.MUST_CACHE, 10);
+    FileSystemTestUtils.createByteFile(sFileSystem, "/testRoot/testDir/testFileB",
+        WritePType.MUST_CACHE, 20);
+    FileSystemTestUtils.createByteFile(sFileSystem, "/testRoot/testFileB",
+        WritePType.MUST_CACHE, 30);
+
+    //count a folders
+    sFsShell.run("count", "/testRoot");
     String expected = "";
     String format = "%-25s%-25s%-15s\n";
-    expected += String.format(format, "File Count", "Folder Count", "Total Bytes");
+    expected += String.format(format, "File Count", "Folder Count", "Folder Size");
     expected += String.format(format, 3, 2, 60);
+
+    //count a folders
+    sFsShell.run("count", "-h", "/testRoot");
+    expected += String.format(format, "File Count", "Folder Count", "Folder Size");
+    expected += String.format(format, 3, 2, "60B");
     assertEquals(expected, mOutput.toString());
   }
 }

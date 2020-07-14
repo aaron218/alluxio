@@ -12,6 +12,9 @@
 package alluxio.master.file;
 
 import alluxio.exception.status.UnavailableException;
+import alluxio.master.file.contexts.CallTracker;
+import alluxio.master.file.contexts.InternalOperationContext;
+import alluxio.master.file.contexts.OperationContext;
 import alluxio.master.journal.JournalContext;
 import alluxio.master.journal.NoopJournalContext;
 import alluxio.proto.journal.Journal.JournalEntry;
@@ -19,6 +22,9 @@ import alluxio.proto.journal.Journal.JournalEntry;
 import com.google.common.base.Throwables;
 
 import java.io.Closeable;
+import java.util.List;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -31,13 +37,14 @@ import javax.annotation.concurrent.NotThreadSafe;
  * guarantees about the order in which resources are closed.
  */
 @NotThreadSafe
-public final class RpcContext implements Closeable {
-  public static final RpcContext NOOP =
-      new RpcContext(NoopBlockDeletionContext.INSTANCE, NoopJournalContext.INSTANCE);
+public final class RpcContext implements Closeable, Supplier<JournalContext> {
+  public static final RpcContext NOOP = new RpcContext(NoopBlockDeletionContext.INSTANCE,
+      NoopJournalContext.INSTANCE, new InternalOperationContext());
 
   @Nullable
   private final BlockDeletionContext mBlockDeletionContext;
   private final JournalContext mJournalContext;
+  private final OperationContext mOperationContext;
 
   // Used during close to keep track of thrown exceptions.
   private Throwable mThrown = null;
@@ -48,10 +55,13 @@ public final class RpcContext implements Closeable {
    *
    * @param blockDeleter block deletion context
    * @param journalContext journal context
+   * @param operationContext the operation context
    */
-  public RpcContext(BlockDeletionContext blockDeleter, JournalContext journalContext) {
+  public RpcContext(BlockDeletionContext blockDeleter, JournalContext journalContext,
+      OperationContext operationContext) {
     mBlockDeletionContext = blockDeleter;
     mJournalContext = journalContext;
+    mOperationContext = operationContext;
   }
 
   /**
@@ -77,10 +87,35 @@ public final class RpcContext implements Closeable {
     return mBlockDeletionContext;
   }
 
+  /**
+   * @return the operation context
+   */
+  public OperationContext getOperationContext() {
+    return mOperationContext;
+  }
+
+  /**
+   * Throws {@link RuntimeException} if the RPC was cancelled by any tracker.
+   */
+  public void throwIfCancelled() {
+    List<CallTracker> cancelledTrackers = mOperationContext.getCancelledTrackers();
+    if (cancelledTrackers.size() > 0) {
+      throw new RuntimeException(String.format("Call cancelled by trackers: %s", cancelledTrackers
+          .stream().map((t) -> t.getType().name()).collect(Collectors.joining(", "))));
+    }
+  }
+
+  /**
+   * @return {@code true} if the operation was cancelled
+   */
+  public boolean isCancelled() {
+    return mOperationContext.getCancelledTrackers().size() > 0;
+  }
+
   @Override
   public void close() throws UnavailableException {
     // JournalContext is closed before block deletion context so that file system master changes
-    // get written before block master changes. If a failure occurs between deleting an inode and
+    // are written before block master changes. If a failure occurs between deleting an inode and
     // remove its blocks, it's better to have an orphaned block than an inode with a missing block.
     closeQuietly(mJournalContext);
     closeQuietly(mBlockDeletionContext);
@@ -103,5 +138,10 @@ public final class RpcContext implements Closeable {
         }
       }
     }
+  }
+
+  @Override
+  public JournalContext get() {
+    return mJournalContext;
   }
 }

@@ -11,6 +11,11 @@
 
 package alluxio;
 
+import alluxio.collections.Pair;
+import alluxio.conf.ServerConfiguration;
+import alluxio.conf.PropertyKey;
+import alluxio.worker.block.BlockStoreLocation;
+
 import com.google.common.collect.ImmutableBiMap;
 
 import java.util.ArrayList;
@@ -20,7 +25,7 @@ import javax.annotation.concurrent.ThreadSafe;
 
 /**
  * Creates a two-way mapping between storage tier aliases and ordinal numbers from the given
- * {@link Configuration}.
+ * {@link ServerConfiguration}.
  */
 @ThreadSafe
 public abstract class StorageTierAssoc {
@@ -52,17 +57,17 @@ public abstract class StorageTierAssoc {
   }
 
   /**
-   * Constructs a new instance using the given {@link Configuration} object. The mapping cannot be
-   * modified after creation.
+   * Constructs a new instance using the given {@link ServerConfiguration} object. The mapping
+   * cannot be modified after creation.
    *
    * @param levelsProperty the property in the conf that specifies how many levels there are
    * @param template the format for the conf that identifies the alias for each level
    */
   protected StorageTierAssoc(PropertyKey levelsProperty, PropertyKey.Template template) {
-    int levels = Configuration.getInt(levelsProperty);
+    int levels = ServerConfiguration.getInt(levelsProperty);
     ImmutableBiMap.Builder<String, Integer> builder = new ImmutableBiMap.Builder<>();
     for (int i = 0; i < levels; i++) {
-      String alias = Configuration.get(template.format(i));
+      String alias = ServerConfiguration.get(template.format(i));
       builder.put(alias, i);
     }
     mAliasToOrdinal = builder.build();
@@ -115,5 +120,18 @@ public abstract class StorageTierAssoc {
       ret.add(getAlias(i));
     }
     return ret;
+  }
+
+  /**
+   * @return list of intersections between tier levels
+   */
+  public List<Pair<BlockStoreLocation, BlockStoreLocation>> intersectionList() {
+    List<Pair<BlockStoreLocation, BlockStoreLocation>> intersectionLocations =
+        new ArrayList<>(size() - 1);
+    for (int tierUp = 0, tierDown = tierUp + 1; tierDown < size(); tierUp++, tierDown++) {
+      intersectionLocations.add(new Pair<>(BlockStoreLocation.anyDirInTier(getAlias(tierUp)),
+          BlockStoreLocation.anyDirInTier(getAlias(tierDown))));
+    }
+    return intersectionLocations;
   }
 }

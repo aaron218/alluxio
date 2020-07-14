@@ -57,15 +57,16 @@ public final class ThreadUtils {
    * tasks.
    *
    * @param pool the executor service to shutdown
+   * @param timeoutMs how long to wait for the service to shut down
    */
-  public static void shutdownAndAwaitTermination(ExecutorService pool) {
+  public static void shutdownAndAwaitTermination(ExecutorService pool, long timeoutMs) {
     pool.shutdown(); // Disable new tasks from being submitted
     try {
       // Wait a while for existing tasks to terminate
-      if (!pool.awaitTermination(1, TimeUnit.SECONDS)) {
+      if (!pool.awaitTermination(timeoutMs / 2, TimeUnit.MILLISECONDS)) {
         pool.shutdownNow(); // Cancel currently executing tasks
         // Wait a while for tasks to respond to being cancelled
-        if (!pool.awaitTermination(1, TimeUnit.SECONDS)) {
+        if (!pool.awaitTermination(timeoutMs / 2, TimeUnit.MILLISECONDS)) {
           LOG.warn("Pool did not terminate");
         }
       }
@@ -74,6 +75,21 @@ public final class ThreadUtils {
       // (Re-)Cancel if current thread also interrupted
       pool.shutdownNow();
     }
+  }
+
+  /**
+   * @return a string representation of the current thread
+   */
+  public static String getCurrentThreadIdentifier() {
+    return getThreadIdentifier(Thread.currentThread());
+  }
+
+  /**
+   * @param thread the thread
+   * @return a string representation of the given thread
+   */
+  public static String getThreadIdentifier(Thread thread) {
+    return String.format("%d(%s)", thread.getId(), thread.getName());
   }
 
   private ThreadUtils() {} // prevent instantiation of utils class

@@ -17,6 +17,7 @@ package alluxio.testutils.underfs.sleeping;
  * creating a {@link SleepingUnderFileSystemFactory}.
  */
 public class SleepingUnderFileSystemOptions {
+  private long mCleanupMs = -1;
   private long mCloseMs = -1;
   private long mConnectFromMasterMs = -1;
   private long mConnectFromWorkerMs = -1;
@@ -31,6 +32,7 @@ public class SleepingUnderFileSystemOptions {
   private long mGetFileStatusMs = -1;
   private long mGetFingerprintMs = -1;
   private long mGetSpaceMs = -1;
+  private long mGetStatusMs = -1;
   private long mGetUnderFSTypeMs = -1;
   private long mIsDirectoryMs = -1;
   private long mIsFileMs = -1;
@@ -45,6 +47,22 @@ public class SleepingUnderFileSystemOptions {
   private long mSetOwnerMs = -1;
   private long mSetModeMs = -1;
   private long mSupportsFlushMs = -1;
+
+  /**
+   * @return milliseconds to sleep before executing a cleanup call
+   */
+  public long getCleanupMs() {
+    return mCleanupMs;
+  }
+
+  /**
+   * @param cleanupMs milliseconds to sleep before executing a cleanup call
+   * @return the updated object
+   */
+  public SleepingUnderFileSystemOptions setCleanupMs(long cleanupMs) {
+    mCleanupMs = cleanupMs;
+    return this;
+  }
 
   /**
    * @return milliseconds to sleep before executing a close call
@@ -259,6 +277,22 @@ public class SleepingUnderFileSystemOptions {
    */
   public long getGetSpaceMs() {
     return mGetSpaceMs;
+  }
+
+  /**
+   * @param getStatusMs milliseconds to sleep before executing a getStatus call
+   * @return the updated object
+   */
+  public SleepingUnderFileSystemOptions setGetStatusMs(long getStatusMs) {
+    mGetStatusMs = getStatusMs;
+    return this;
+  }
+
+  /**
+   * @return milliseconds to sleep before executing a getStatus call
+   */
+  public long getGetStatusMs() {
+    return mGetStatusMs;
   }
 
   /**

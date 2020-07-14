@@ -11,17 +11,24 @@
 
 package alluxio.conf;
 
+import alluxio.annotation.PublicApi;
+
 import com.google.common.base.Objects;
 
 /**
  * The source of a configuration property.
+ *
+ * The natural ordering of this class is not consistent with the {@link #equals(Object)} method.
  */
+@PublicApi
 public class Source implements Comparable<Source> {
   public static final Source UNKNOWN = new Source(Type.UNKNOWN);
   public static final Source DEFAULT = new Source(Type.DEFAULT);
   public static final Source CLUSTER_DEFAULT = new Source(Type.CLUSTER_DEFAULT);
   public static final Source SYSTEM_PROPERTY = new Source(Type.SYSTEM_PROPERTY);
+  public static final Source PATH_DEFAULT = new Source(Type.PATH_DEFAULT);
   public static final Source RUNTIME = new Source(Type.RUNTIME);
+  public static final Source MOUNT_OPTION = new Source(Type.MOUNT_OPTION);
 
   /**
    * Source type.
@@ -48,10 +55,19 @@ public class Source implements Comparable<Source> {
      */
     SYSTEM_PROPERTY,
     /**
+     * The property value is specified as path level defaults through command line.
+     */
+    PATH_DEFAULT,
+    /**
      * The property value is set by user during runtime (e.g., Configuration.set or through
-     * HadoopConf). This source has the highest priority.
+     * HadoopConf).
      */
     RUNTIME,
+    /**
+     * The property value is specified as options for a mount point. This source has the highest
+     * priority.
+     */
+    MOUNT_OPTION,
   }
 
   protected final Type mType;
@@ -83,6 +99,26 @@ public class Source implements Comparable<Source> {
   }
 
   @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+
+    if (!(o instanceof Source)) {
+      return false;
+    }
+
+    Source other = (Source) o;
+
+    return compareTo(other) == 0;
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hashCode(mType);
+  }
+
+  @Override
   public String toString() {
     return mType.name();
   }
@@ -100,7 +136,8 @@ public class Source implements Comparable<Source> {
       if (this == o) {
         return true;
       }
-      if (!(o instanceof SitePropertySource)) {
+
+      if (o == null || this.getClass() != o.getClass()) {
         return false;
       }
       SitePropertySource that = (SitePropertySource) o;

@@ -12,6 +12,13 @@
 package alluxio.master.file.meta;
 
 import alluxio.AlluxioURI;
+import alluxio.conf.PropertyKey;
+import alluxio.conf.ServerConfiguration;
+import alluxio.grpc.FileSystemMasterCommonPOptions;
+import alluxio.master.file.contexts.GetStatusContext;
+import alluxio.master.file.meta.InodeTree.LockPattern;
+
+import com.google.common.base.MoreObjects;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -21,38 +28,61 @@ import javax.annotation.concurrent.ThreadSafe;
 @ThreadSafe
 public final class LockingScheme {
   private final AlluxioURI mPath;
-  private final InodeTree.LockMode mDesiredLockMode;
+  private final LockPattern mDesiredLockPattern;
   private final boolean mShouldSync;
 
   /**
    * Constructs a {@link LockingScheme}.
    *
    * @param path the path to lock
-   * @param desiredLockMode the desired lock mode
+   * @param desiredLockPattern the desired lock mode
    * @param shouldSync true if the path should be synced
    */
-  public LockingScheme(AlluxioURI path, InodeTree.LockMode desiredLockMode, boolean shouldSync) {
+  public LockingScheme(AlluxioURI path, LockPattern desiredLockPattern, boolean shouldSync) {
     mPath = path;
-    mDesiredLockMode = desiredLockMode;
+    mDesiredLockPattern = desiredLockPattern;
     mShouldSync = shouldSync;
+  }
+
+  /**
+   * Create a new {@link LockingScheme}.
+   *
+   * Thi constructor computes the value of {@link #mShouldSync} with the extra argument provided.
+   *
+   * @param path the path to lock
+   * @param desiredPattern the desired lock mode
+   * @param options the common options provided in an RPC
+   * @param pathCache the {@link alluxio.master.file.DefaultFileSystemMaster}'s path cache
+   * @param isGetFileInfo whether the caller is
+   * {@link alluxio.master.file.FileSystemMaster#getFileInfo(AlluxioURI, GetStatusContext)}
+   */
+  public LockingScheme(AlluxioURI path, LockPattern desiredPattern,
+      FileSystemMasterCommonPOptions options, UfsSyncPathCache pathCache, boolean isGetFileInfo) {
+    mPath = path;
+    mDesiredLockPattern = desiredPattern;
+    // If client options didn't specify the interval, fallback to whatever the server has
+    // configured to prevent unnecessary syncing due to the default value being 0
+    long syncInterval = options.hasSyncIntervalMs() ? options.getSyncIntervalMs() :
+        ServerConfiguration.getMs(PropertyKey.USER_FILE_METADATA_SYNC_INTERVAL);
+    mShouldSync = pathCache.shouldSyncPath(path.getPath(), syncInterval, isGetFileInfo);
   }
 
   /**
    * @return the desired mode for the locking
    */
-  InodeTree.LockMode getDesiredMode() {
-    return mDesiredLockMode;
+  public LockPattern getDesiredPattern() {
+    return mDesiredLockPattern;
   }
 
   /**
    * @return the mode that should be used to lock the path, considering if ufs sync should occur
    */
-  public InodeTree.LockMode getMode() {
+  public LockPattern getPattern() {
     if (mShouldSync) {
-      // Syncing requires write.
-      return InodeTree.LockMode.WRITE;
+      // Syncing needs to be able to delete the inode if it was deleted in the UFS.
+      return LockPattern.WRITE_EDGE;
     }
-    return mDesiredLockMode;
+    return mDesiredLockPattern;
   }
 
   /**
@@ -67,5 +97,14 @@ public final class LockingScheme {
    */
   public boolean shouldSync() {
     return mShouldSync;
+  }
+
+  @Override
+  public String toString() {
+    return MoreObjects.toStringHelper(this)
+        .add("path", mPath)
+        .add("desiredLockPattern", mDesiredLockPattern)
+        .add("shouldSync", mShouldSync)
+        .toString();
   }
 }

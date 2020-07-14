@@ -52,6 +52,12 @@ public class SleepingUnderFileSystem extends LocalUnderFileSystem {
   }
 
   @Override
+  public void cleanup() throws IOException {
+    sleepIfNecessary(mOptions.getCleanupMs());
+    super.cleanup();
+  }
+
+  @Override
   public void close() throws IOException {
     sleepIfNecessary(mOptions.getCloseMs());
     super.close();
@@ -122,6 +128,12 @@ public class SleepingUnderFileSystem extends LocalUnderFileSystem {
       throws IOException {
     sleepIfNecessary(mOptions.getGetFileLocationsMs());
     return super.getFileLocations(cleanPath(path), options);
+  }
+
+  @Override
+  public UfsStatus getStatus(String path) throws IOException {
+    sleepIfNecessary(mOptions.getGetStatusMs());
+    return super.getStatus(cleanPath(path));
   }
 
   @Override
@@ -213,7 +225,7 @@ public class SleepingUnderFileSystem extends LocalUnderFileSystem {
   }
 
   @Override
-  public boolean supportsFlush() {
+  public boolean supportsFlush() throws IOException {
     sleepIfNecessary(mOptions.getSupportsFlushMs());
     return super.supportsFlush();
   }

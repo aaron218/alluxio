@@ -15,11 +15,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertFalse;
 
-import alluxio.client.WriteType;
 import alluxio.client.file.FileSystemTestUtils;
 import alluxio.exception.AlluxioException;
 import alluxio.client.cli.fs.AbstractFileSystemShellTest;
 import alluxio.client.cli.fs.FileSystemShellUtilsTest;
+import alluxio.grpc.WritePType;
 
 import org.junit.Test;
 
@@ -33,43 +33,44 @@ public final class FreeCommandIntegrationTest extends AbstractFileSystemShellTes
   @Test
   public void freeNonPersistedFile() throws IOException, AlluxioException {
     String fileName = "/testFile";
-    FileSystemTestUtils.createByteFile(mFileSystem, fileName, WriteType.MUST_CACHE, 10);
+    FileSystemTestUtils.createByteFile(sFileSystem, fileName, WritePType.MUST_CACHE, 10);
     // freeing non persisted files is expected to fail
-    assertEquals(-1, mFsShell.run("free", fileName));
+    assertEquals(-1, sFsShell.run("free", fileName));
     assertTrue(isInMemoryTest(fileName));
   }
 
   @Test
   public void freePinnedFile() throws IOException, AlluxioException {
     String fileName = "/testFile";
-    FileSystemTestUtils.createByteFile(mFileSystem, fileName, WriteType.CACHE_THROUGH, 10);
-    mFsShell.run("pin", fileName);
+    FileSystemTestUtils.createByteFile(sFileSystem, fileName, WritePType.CACHE_THROUGH, 10);
+    sFsShell.run("pin", fileName);
     // freeing non persisted files is expected to fail
-    assertEquals(-1, mFsShell.run("free", fileName));
+    assertEquals(-1, sFsShell.run("free", fileName));
     assertTrue(isInMemoryTest(fileName));
   }
 
   @Test
   public void freePinnedFileForced() throws IOException, AlluxioException {
     String fileName = "/testFile";
-    FileSystemTestUtils.createByteFile(mFileSystem, fileName, WriteType.CACHE_THROUGH, 10);
-    mFsShell.run("pin", fileName);
-    assertEquals(0, mFsShell.run("free", "-f", fileName));
+    FileSystemTestUtils.createByteFile(sFileSystem, fileName, WritePType.CACHE_THROUGH, 10);
+    sFsShell.run("pin", fileName);
+    assertEquals(0, sFsShell.run("free", "-f", fileName));
     assertFalse(isInMemoryTest(fileName));
   }
 
   @Test
   public void free() throws IOException, AlluxioException {
     String fileName = "/testFile";
-    FileSystemTestUtils.createByteFile(mFileSystem, fileName, WriteType.CACHE_THROUGH, 10);
-    assertEquals(0, mFsShell.run("free", fileName));
+    FileSystemTestUtils.createByteFile(sFileSystem, fileName, WritePType.CACHE_THROUGH, 10);
+    assertEquals(0, sFsShell.run("free", fileName));
     assertFalse(isInMemoryTest(fileName));
   }
 
   @Test
   public void freeWildCardNonPersistedFile() throws IOException, AlluxioException {
-    String testDir = FileSystemShellUtilsTest.resetFileHierarchy(mFileSystem, WriteType.MUST_CACHE);
-    assertEquals(-1, mFsShell.run("free", testDir + "/foo/*"));
+    String testDir =
+        FileSystemShellUtilsTest.resetFileHierarchy(sFileSystem, WritePType.MUST_CACHE);
+    assertEquals(-1, sFsShell.run("free", testDir + "/foo/*"));
     // freeing non persisted files is expected to fail
     assertTrue(isInMemoryTest(testDir + "/foo/foobar1"));
     assertTrue(isInMemoryTest(testDir + "/foo/foobar2"));
@@ -80,9 +81,9 @@ public final class FreeCommandIntegrationTest extends AbstractFileSystemShellTes
   @Test
   public void freeWildCardPinnedFile() throws IOException, AlluxioException {
     String testDir =
-        FileSystemShellUtilsTest.resetFileHierarchy(mFileSystem, WriteType.CACHE_THROUGH);
-    mFsShell.run("pin", testDir + "/foo/*");
-    assertEquals(-1, mFsShell.run("free", testDir + "/foo/*"));
+        FileSystemShellUtilsTest.resetFileHierarchy(sFileSystem, WritePType.CACHE_THROUGH);
+    sFsShell.run("pin", testDir + "/foo/*");
+    assertEquals(-1, sFsShell.run("free", testDir + "/foo/*"));
     // freeing non pinned files is expected to fail without "-f"
     assertTrue(isInMemoryTest(testDir + "/foo/foobar1"));
     assertTrue(isInMemoryTest(testDir + "/foo/foobar2"));
@@ -91,9 +92,9 @@ public final class FreeCommandIntegrationTest extends AbstractFileSystemShellTes
   @Test
   public void freeWildCardPinnedFileForced() throws IOException, AlluxioException {
     String testDir =
-        FileSystemShellUtilsTest.resetFileHierarchy(mFileSystem, WriteType.CACHE_THROUGH);
-    mFsShell.run("pin", testDir + "/foo/foobar1");
-    assertEquals(0, mFsShell.run("free", "-f", testDir + "/foo/*"));
+        FileSystemShellUtilsTest.resetFileHierarchy(sFileSystem, WritePType.CACHE_THROUGH);
+    sFsShell.run("pin", testDir + "/foo/foobar1");
+    assertEquals(0, sFsShell.run("free", "-f", testDir + "/foo/*"));
     assertFalse(isInMemoryTest(testDir + "/foo/foobar1"));
     assertFalse(isInMemoryTest(testDir + "/foo/foobar2"));
     assertTrue(isInMemoryTest(testDir + "/bar/foobar3"));
@@ -103,15 +104,15 @@ public final class FreeCommandIntegrationTest extends AbstractFileSystemShellTes
   @Test
   public void freeWildCard() throws IOException, AlluxioException {
     String testDir =
-        FileSystemShellUtilsTest.resetFileHierarchy(mFileSystem, WriteType.CACHE_THROUGH);
-    int ret = mFsShell.run("free", testDir + "/foo/*");
+        FileSystemShellUtilsTest.resetFileHierarchy(sFileSystem, WritePType.CACHE_THROUGH);
+    int ret = sFsShell.run("free", testDir + "/foo/*");
     assertEquals(0, ret);
     assertFalse(isInMemoryTest(testDir + "/foo/foobar1"));
     assertFalse(isInMemoryTest(testDir + "/foo/foobar2"));
     assertTrue(isInMemoryTest(testDir + "/bar/foobar3"));
     assertTrue(isInMemoryTest(testDir + "/foobar4"));
 
-    ret = mFsShell.run("free", testDir + "/*/");
+    ret = sFsShell.run("free", testDir + "/*/");
     assertEquals(0, ret);
     assertFalse(isInMemoryTest(testDir + "/bar/foobar3"));
     assertFalse(isInMemoryTest(testDir + "/foobar4"));

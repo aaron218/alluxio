@@ -13,7 +13,7 @@ package alluxio.underfs.gcs;
 
 import alluxio.AlluxioURI;
 import alluxio.Constants;
-import alluxio.PropertyKey;
+import alluxio.conf.PropertyKey;
 import alluxio.underfs.UnderFileSystem;
 import alluxio.underfs.UnderFileSystemConfiguration;
 import alluxio.underfs.UnderFileSystemFactory;
@@ -69,7 +69,7 @@ public final class GCSUnderFileSystemFactory implements UnderFileSystemFactory {
    * @return true if both access and secret key are present, false otherwise
    */
   private boolean checkGoogleCredentials(UnderFileSystemConfiguration conf) {
-    return conf.containsKey(PropertyKey.GCS_ACCESS_KEY)
-        && conf.containsKey(PropertyKey.GCS_SECRET_KEY);
+    return conf.isSet(PropertyKey.GCS_ACCESS_KEY)
+        && conf.isSet(PropertyKey.GCS_SECRET_KEY);
   }
 }

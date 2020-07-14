@@ -30,6 +30,7 @@ import java.io.OutputStream;
 import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -70,15 +71,16 @@ public final class GCSOutputStream extends OutputStream {
    * @param bucketName the name of the bucket
    * @param key the key of the file
    * @param client the JetS3t client
+   * @param tmpDirs a list of temporary directories
    */
-  public GCSOutputStream(String bucketName, String key, GoogleStorageService client)
-      throws IOException {
+  public GCSOutputStream(String bucketName, String key, GoogleStorageService client,
+      List<String> tmpDirs) throws IOException {
     Preconditions.checkArgument(bucketName != null && !bucketName.isEmpty(), "Bucket name must "
         + "not be null or empty.");
     mBucketName = bucketName;
     mKey = key;
     mClient = client;
-    mFile = new File(PathUtils.concatPath(CommonUtils.getTmpDir(), UUID.randomUUID()));
+    mFile = new File(PathUtils.concatPath(CommonUtils.getTmpDir(tmpDirs), UUID.randomUUID()));
     try {
       mHash = MessageDigest.getInstance("MD5");
       mLocalOutputStream =
@@ -128,12 +130,15 @@ public final class GCSOutputStream extends OutputStream {
         LOG.warn("MD5 was not computed for: {}", mKey);
       }
       mClient.putObject(mBucketName, obj);
+    } catch (ServiceException e) {
+      LOG.error("Failed to upload {}.", mKey);
+      throw new IOException(e);
+    } finally {
+      // Delete the temporary file on the local machine if the GCS client completed the
+      // upload or if the upload failed.
       if (!mFile.delete()) {
         LOG.error("Failed to delete temporary file @ {}", mFile.getPath());
       }
-    } catch (ServiceException e) {
-      LOG.error("Failed to upload {}. Temporary file @ {}", mKey, mFile.getPath());
-      throw new IOException(e);
     }
   }
 }
